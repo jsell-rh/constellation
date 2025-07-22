@@ -4,7 +4,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { v4 as uuidv4 } from 'uuid';
+import { ulid } from "ulid";
 import type { Librarian, Context, Response, TraceContext } from '../types/core';
 import { isValidResponse } from '../types/librarian-factory';
 
@@ -231,6 +231,6 @@ export class LibrarianExecutor extends EventEmitter {
    * Generate a unique ID
    */
   private generateId(): string {
-    return uuidv4();
+    return ulid();
   }
 }
