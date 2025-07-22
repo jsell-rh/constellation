@@ -5,7 +5,12 @@ Constellation is a distributed AI-powered knowledge orchestration framework that
 
 ## Key Technical Decisions
 
-### 1. **LLM Integration**
+### 1. **Gateway Interface**
+- **Choice**: Model Context Protocol (MCP) Server
+- **Reason**: Direct integration with Claude and other AI assistants, automatic tool discovery
+- **Architecture**: MCP gateway exposes librarians as tools, keeping internal components unchanged
+
+### 2. **LLM Integration**
 - **Choice**: LangChain (TypeScript)
 - **Reason**: Native support for Gemini Vertex AI and other providers needed by Red Hat
 - **Providers**: OpenAI, Anthropic, Vertex AI, Azure OpenAI
