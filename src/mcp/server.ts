@@ -30,7 +30,6 @@ export interface MCPServerOptions {
  * MCP Server that exposes Constellation functionality using the proper McpServer class
  */
 export class ConstellationMCPServer {
-  private server: McpServer;
   private delegationEngine: DelegationEngine;
   private options: MCPServerOptions;
 
@@ -46,8 +45,19 @@ export class ConstellationMCPServer {
       ...options,
     };
 
-    // Create MCP server using the proper SDK class
-    this.server = new McpServer({
+    // For stateless mode, we don't create a persistent server instance
+    // Instead, we create new instances for each request
+    
+    // Initialize delegation engine
+    this.delegationEngine = new DelegationEngine(router);
+  }
+
+
+  /**
+   * Create a new MCP server instance (for stateless mode)
+   */
+  private createServerInstance(): McpServer {
+    const server = new McpServer({
       name: this.options.name ?? 'constellation',
       version: this.options.version ?? '0.1.0'
     }, {
@@ -57,19 +67,19 @@ export class ConstellationMCPServer {
       }
     });
 
-    // Initialize delegation engine
-    this.delegationEngine = new DelegationEngine(router);
-
-    // Register tools and resources
-    this.registerMCPHandlers();
+    // Register tools and resources on each new instance
+    this.registerToolsOnServer(server);
+    this.registerResourcesOnServer(server);
+    
+    return server;
   }
 
   /**
-   * Register MCP tools and resources using the proper SDK methods
+   * Register tools on a server instance
    */
-  private registerMCPHandlers(): void {
+  private registerToolsOnServer(server: McpServer): void {
     // Register the main query tool
-    this.server.registerTool(
+    server.registerTool(
       'query',
       {
         title: 'Query Constellation',
@@ -86,7 +96,6 @@ export class ConstellationMCPServer {
       async ({ query, context }) => {
         logger.info({ query }, 'Processing query via delegation engine');
         
-        // Convert MCP context to Constellation context
         const constellationContext: Context = {
           metadata: {
             source: 'mcp',
@@ -95,15 +104,13 @@ export class ConstellationMCPServer {
           ...(context?.user_id && { user: { id: context.user_id } })
         };
 
-        // Route through delegation engine
         const response = await this.delegationEngine.route(query, constellationContext);
-        
         return this.formatMCPResponse(response);
       }
     );
 
     // Register the direct librarian query tool
-    this.server.registerTool(
+    server.registerTool(
       'query_librarian',
       {
         title: 'Query Specific Librarian',
@@ -121,7 +128,6 @@ export class ConstellationMCPServer {
       async ({ librarian_id, query, context }) => {
         logger.info({ librarian_id, query }, 'Processing direct librarian query');
         
-        // Convert MCP context to Constellation context  
         const constellationContext: Context = {
           metadata: {
             source: 'mcp',
@@ -131,15 +137,17 @@ export class ConstellationMCPServer {
           ...(context?.user_id && { user: { id: context.user_id } })
         };
 
-        // Route directly to specified librarian
         const response = await this.router.route(query, librarian_id, constellationContext);
-        
         return this.formatMCPResponse(response);
       }
     );
+  }
 
-    // Register the librarian hierarchy resource
-    this.server.registerResource(
+  /**
+   * Register resources on a server instance
+   */
+  private registerResourcesOnServer(server: McpServer): void {
+    server.registerResource(
       'librarian-hierarchy',
       'constellation://librarian-hierarchy',
       {
@@ -161,7 +169,6 @@ export class ConstellationMCPServer {
           }>
         };
 
-        // Build hierarchy structure
         for (const id of librarians) {
           const metadata = this.router.getMetadata(id);
           if (metadata) {
@@ -189,12 +196,11 @@ export class ConstellationMCPServer {
   }
 
   /**
-   * Start the MCP server with HTTP transport
+   * Start the MCP server with HTTP transport (stateless mode)
    */
   async start(): Promise<void> {
     const express = await import('express');
     const cors = await import('cors');
-    const { randomUUID } = await import('node:crypto');
     
     const app = express.default();
     app.use(express.default.json());
@@ -204,20 +210,6 @@ export class ConstellationMCPServer {
       origin: '*',
       exposedHeaders: ['Mcp-Session-Id']
     }));
-
-    // Create StreamableHTTP transport
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: () => randomUUID(),
-      onsessioninitialized: (sessionId: string) => {
-        logger.info(`MCP session initialized: ${sessionId}`);
-      },
-      onsessionclosed: (sessionId: string) => {
-        logger.info(`MCP session closed: ${sessionId}`);
-      }
-    });
-
-    // Connect our MCP server to the transport
-    await this.server.connect(transport);
 
     // Health check endpoint
     app.get('/health', (_req, res) => {
@@ -231,17 +223,63 @@ export class ConstellationMCPServer {
       });
     });
 
-    // MCP endpoints - let the transport handle them
-    app.post('/mcp', (req, res) => {
-      transport.handleRequest(req, res);
+    // MCP POST endpoint (stateless mode)
+    app.post('/mcp', async (req, res) => {
+      // Create new server instance for each request to avoid collisions
+      try {
+        const server = this.createServerInstance();
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: undefined, // Stateless mode
+        });
+        
+        res.on('close', () => {
+          logger.debug('Request closed');
+          transport.close();
+          server.close();
+        });
+        
+        await server.connect(transport);
+        await transport.handleRequest(req, res, req.body);
+        
+      } catch (error) {
+        logger.error({ error }, 'Error handling MCP request');
+        if (!res.headersSent) {
+          res.status(500).json({
+            jsonrpc: '2.0',
+            error: {
+              code: -32603,
+              message: 'Internal server error',
+            },
+            id: null,
+          });
+        }
+      }
     });
 
-    app.get('/mcp', (req, res) => {
-      transport.handleRequest(req, res);
+    // SSE notifications not supported in stateless mode
+    app.get('/mcp', async (_req, res) => {
+      logger.debug('Received GET MCP request - not supported in stateless mode');
+      res.writeHead(405).end(JSON.stringify({
+        jsonrpc: "2.0",
+        error: {
+          code: -32000,
+          message: "Method not allowed."
+        },
+        id: null
+      }));
     });
 
-    app.delete('/mcp', (req, res) => {
-      transport.handleRequest(req, res);
+    // Session termination not needed in stateless mode
+    app.delete('/mcp', async (_req, res) => {
+      logger.debug('Received DELETE MCP request - not supported in stateless mode');
+      res.writeHead(405).end(JSON.stringify({
+        jsonrpc: "2.0",
+        error: {
+          code: -32000,
+          message: "Method not allowed."
+        },
+        id: null
+      }));
     });
 
     // Start HTTP server
@@ -282,12 +320,6 @@ export class ConstellationMCPServer {
     });
   }
 
-  /**
-   * Get the underlying McpServer instance for transport connection
-   */
-  getServer(): McpServer {
-    return this.server;
-  }
 
   /**
    * Format a Constellation response for MCP tool result
