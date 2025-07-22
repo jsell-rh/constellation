@@ -68,9 +68,7 @@
   "exclude": [
     "node_modules",
     "dist",
-    "coverage",
-    "**/*.spec.ts",
-    "**/*.test.ts"
+    "coverage"
   ],
   "ts-node": {
     "require": ["tsconfig-paths/register"]

@@ -1,0 +1,11 @@
+dist/
+coverage/
+node_modules/
+*.md
+*.yaml
+*.yml
+.git/
+.vscode/
+.idea/
+Dockerfile
+.dockerignore
