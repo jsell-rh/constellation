@@ -23,6 +23,8 @@ export * from './mcp';
  */
 async function main(): Promise<void> {
   logger.info('Starting Constellation MCP Server');
+  
+  console.log('🚀 Starting Constellation...\n');
 
   // Create router
   const router = new SimpleRouter();
@@ -53,7 +55,8 @@ async function main(): Promise<void> {
 
   // TODO: Register more librarians from registry
 
-  logger.info(`Registered ${router.getAllLibrarians().length} librarians`);
+  const librarianCount = router.getAllLibrarians().length;
+  logger.info(`Registered ${librarianCount} librarians`);
 
   // Start MCP server
   await runMCPServer(router);

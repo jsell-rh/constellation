@@ -4,7 +4,7 @@
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import {
   CallToolRequestSchema,
   ListResourcesRequestSchema,
@@ -29,6 +29,10 @@ export interface MCPServerOptions {
   name?: string;
   /** Server version */
   version?: string;
+  /** HTTP port for hosted server */
+  port?: number;
+  /** HTTP host for hosted server */
+  host?: string;
 }
 
 interface QueryArgs {
@@ -56,15 +60,24 @@ interface QueryLibrarianArgs {
 export class ConstellationMCPServer {
   private server: Server;
   private delegationEngine: DelegationEngine;
+  private options: MCPServerOptions;
 
   constructor(
     private router: SimpleRouter,
     options: MCPServerOptions = {}
   ) {
+    this.options = {
+      name: 'constellation',
+      version: process.env.npm_package_version ?? '0.1.0',
+      port: 3001,
+      host: 'localhost',
+      ...options,
+    };
+
     this.server = new Server(
       {
-        name: options.name ?? 'constellation',
-        version: options.version ?? process.env.npm_package_version ?? '0.1.0',
+        name: this.options.name ?? 'constellation',
+        version: this.options.version ?? '0.1.0',
       },
       {
         capabilities: {
@@ -82,12 +95,109 @@ export class ConstellationMCPServer {
   }
 
   /**
-   * Start the MCP server
+   * Start the MCP server with HTTP transport
    */
   async start(): Promise<void> {
-    const transport = new StdioServerTransport();
-    await this.server.connect(transport);
-    logger.info('MCP server started');
+    await this.startHttpServer();
+  }
+
+  /**
+   * Start HTTP server for MCP-over-HTTP
+   */
+  private async startHttpServer(): Promise<void> {
+    const express = await import('express');
+    const cors = await import('cors');
+    
+    const app = express.default();
+    app.use(cors.default());
+    app.use(express.default.json());
+
+    // Store active transports by session ID
+    const transports: Record<string, StreamableHTTPServerTransport> = {};
+
+    // Health check endpoint
+    app.get('/health', (_req, res) => {
+      res.json({ 
+        status: 'ok', 
+        server: this.options.name, 
+        version: this.options.version,
+        librarians: this.router.getAllLibrarians().length,
+        protocol: 'MCP (Model Context Protocol)',
+        transport: 'HTTP'
+      });
+    });
+
+    // MCP endpoint for handling MCP requests over HTTP
+    app.post('/mcp', async (req, res) => {
+      try {
+        const sessionId = req.headers['x-mcp-session-id'] as string;
+        let transport = transports[sessionId];
+
+        if (!transport) {
+          // Create new transport for this session
+          transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: () => sessionId || `session-${Date.now()}-${Math.random()}`,
+            onsessioninitialized: (id: string) => {
+              logger.info(`MCP session initialized: ${id}`);
+              if (transport) {
+                transports[id] = transport;
+              }
+            }
+          });
+
+          // Clean up transport on close
+          transport.onclose = () => {
+            const id = transport?.sessionId;
+            if (id && transports[id]) {
+              logger.info(`MCP session closed: ${id}`);
+              delete transports[id];
+            }
+          };
+
+          // Connect transport to our MCP server
+          await this.server.connect(transport);
+        }
+
+        // Handle the MCP request
+        const response = await transport.handleRequest(req, res);
+        res.json(response);
+        
+      } catch (error) {
+        logger.error({ error }, 'MCP request failed');
+        res.status(500).json({ 
+          error: 'Internal server error',
+          message: error instanceof Error ? error.message : 'Unknown error'
+        });
+      }
+    });
+
+    // Start the HTTP server
+    app.listen(this.options.port ?? 3001, this.options.host ?? 'localhost', () => {
+      const host = this.options.host ?? 'localhost';
+      const port = this.options.port ?? 3001;
+      const url = `http://${host}:${port}`;
+      
+      console.log(`\n🌟 Constellation MCP Server`);
+      console.log(`═══════════════════════════`);
+      console.log(`🌐 Server URL: ${url}`);
+      console.log(`📡 Health Check: ${url}/health`);
+      console.log(`🔌 MCP Endpoint: ${url}/mcp`);
+      console.log(`📚 Available Tools: query, query_librarian`);
+      console.log(`📖 Resources: constellation://librarian-hierarchy`);
+      console.log(`═══════════════════════════\n`);
+      
+      logger.info({
+        transport: 'http',
+        protocol: 'MCP (Model Context Protocol)',
+        url,
+        endpoints: {
+          health: `${url}/health`,
+          mcp: `${url}/mcp`
+        },
+        tools: ['query', 'query_librarian'],
+        resources: ['constellation://librarian-hierarchy']
+      }, 'MCP server started and ready for connections');
+    });
   }
 
   /**
