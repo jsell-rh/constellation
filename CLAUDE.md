@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## IMPORTANT: Start Here
+
+**ALWAYS read `AGENT_INSTRUCTIONS.md` first before doing any work in this repository.** It contains the authoritative mission, implementation details, and success criteria for the Constellation project. This CLAUDE.md file supplements those instructions with additional guidelines for working effectively in this codebase.
+
 ## Project Overview
 
 Constellation is a distributed AI-powered knowledge orchestration framework that enables teams to create AI-powered "librarians" providing intelligent access to enterprise data. The core principle: teams write simple async functions, the framework handles everything else.
