@@ -43,16 +43,32 @@ Expected response:
 Use HTTP POST requests to interact with the MCP server:
 
 ```bash
-# List available tools
+# 1. Initialize MCP session (required first step)
 curl -X POST http://localhost:3001/mcp \
   -H "Content-Type: application/json" \
-  -H "x-mcp-session-id: test-session" \
-  -d '{"jsonrpc": "2.0", "method": "tools/list", "id": 1}'
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "initialize",
+    "params": {
+      "protocolVersion": "2024-11-05",
+      "capabilities": {"roots": {"listChanged": true}},
+      "clientInfo": {"name": "test-client", "version": "1.0.0"}
+    },
+    "id": 1
+  }'
 
-# Call the query tool
+# This returns a session ID, use it in subsequent requests with mcp-session-id header
+
+# 2. List available tools
 curl -X POST http://localhost:3001/mcp \
   -H "Content-Type: application/json" \
-  -H "x-mcp-session-id: test-session" \
+  -H "mcp-session-id: <session-id-from-step-1>" \
+  -d '{"jsonrpc": "2.0", "method": "tools/list", "id": 2}'
+
+# 3. Call the query tool
+curl -X POST http://localhost:3001/mcp \
+  -H "Content-Type: application/json" \
+  -H "mcp-session-id: <session-id-from-step-1>" \
   -d '{
     "jsonrpc": "2.0", 
     "method": "tools/call", 
@@ -60,18 +76,18 @@ curl -X POST http://localhost:3001/mcp \
       "name": "query",
       "arguments": {"query": "Hello, how can you help me?"}
     },
-    "id": 2
+    "id": 3
   }'
 
-# Get librarian hierarchy resource
+# 4. Get librarian hierarchy resource
 curl -X POST http://localhost:3001/mcp \
   -H "Content-Type: application/json" \
-  -H "x-mcp-session-id: test-session" \
+  -H "mcp-session-id: <session-id-from-step-1>" \
   -d '{
     "jsonrpc": "2.0",
     "method": "resources/read", 
     "params": {"uri": "constellation://librarian-hierarchy"},
-    "id": 3
+    "id": 4
   }'
 ```
 

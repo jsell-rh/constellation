@@ -14,6 +14,7 @@ import {
   Resource,
   TextContent,
   ImageContent,
+  isInitializeRequest,
 } from '@modelcontextprotocol/sdk/types.js';
 import type { SimpleRouter } from '../core/router';
 import type { Context, Response } from '../types/core';
@@ -130,13 +131,13 @@ export class ConstellationMCPServer {
     // MCP endpoint for handling MCP requests over HTTP
     app.post('/mcp', async (req, res) => {
       try {
-        const sessionId = req.headers['x-mcp-session-id'] as string;
+        const sessionId = req.headers['mcp-session-id'] as string || req.headers['x-mcp-session-id'] as string;
         let transport = transports[sessionId];
 
-        if (!transport) {
-          // Create new transport for this session
+        if (!transport && (!sessionId && isInitializeRequest(req.body))) {
+          // New initialization request - create new transport
           transport = new StreamableHTTPServerTransport({
-            sessionIdGenerator: () => sessionId || `session-${Date.now()}-${Math.random()}`,
+            sessionIdGenerator: () => `session-${Date.now()}-${Math.random()}`,
             onsessioninitialized: (id: string) => {
               logger.info(`MCP session initialized: ${id}`);
               if (transport) {
@@ -156,18 +157,51 @@ export class ConstellationMCPServer {
 
           // Connect transport to our MCP server
           await this.server.connect(transport);
+        } else if (!transport) {
+          // No existing transport and not an initialization request
+          res.status(400).json({ 
+            error: 'Invalid session or missing initialization',
+            message: 'Please send an initialization request first'
+          });
+          return;
         }
 
-        // Handle the MCP request
-        const response = await transport.handleRequest(req, res);
-        res.json(response);
+        // Let the transport handle the request completely
+        // It will handle the response internally
+        await transport.handleRequest(req, res);
         
       } catch (error) {
         logger.error({ error }, 'MCP request failed');
-        res.status(500).json({ 
-          error: 'Internal server error',
-          message: error instanceof Error ? error.message : 'Unknown error'
-        });
+        if (!res.headersSent) {
+          res.status(500).json({ 
+            error: 'Internal server error',
+            message: error instanceof Error ? error.message : 'Unknown error'
+          });
+        }
+      }
+    });
+
+    // MCP GET endpoint for SSE streams 
+    app.get('/mcp', async (req, res) => {
+      try {
+        const sessionId = req.headers['mcp-session-id'] as string || req.headers['x-mcp-session-id'] as string;
+        
+        if (!sessionId || !transports[sessionId]) {
+          res.status(400).send('Invalid or missing session ID');
+          return;
+        }
+
+        const transport = transports[sessionId];
+        await transport.handleRequest(req, res);
+        
+      } catch (error) {
+        logger.error({ error }, 'MCP GET request failed');
+        if (!res.headersSent) {
+          res.status(500).json({ 
+            error: 'Internal server error',
+            message: error instanceof Error ? error.message : 'Unknown error'
+          });
+        }
       }
     });
 
