@@ -10,3 +10,6 @@ export type {
   ErrorEvent,
   ValidationResult,
 } from './executor';
+
+export { SimpleRouter } from './router';
+export type { RouterOptions } from './router';
