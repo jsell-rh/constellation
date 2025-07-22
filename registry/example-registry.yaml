@@ -1,0 +1,218 @@
+# Constellation - Example Registry
+# This shows how teams register their librarians
+
+metadata:
+  version: "1.0"
+  lastUpdated: "2024-01-15"
+  description: "Example registry showing various librarian configurations"
+
+librarians:
+  # ==================================================
+  # GLOBAL ROUTER
+  # ==================================================
+  - id: global-assistant
+    name: "Global Assistant"
+    description: "Main entry point that routes queries to appropriate teams"
+    endpoint: https://api.redhat.com/librarians/global
+    type: router
+    capabilities:
+      - general.routing
+      - query.analysis
+      - multi.domain.coordination
+    delegates_to:
+      - platform-team
+      - security-team
+      - product-docs
+      - hr-support
+    sla:
+      response_time_ms: 500
+      availability: 99.99
+
+  # ==================================================
+  # TEAM SPECIALISTS
+  # ==================================================
+  
+  # Platform Engineering Team
+  - id: platform-team
+    name: "Platform Engineering"
+    description: "Kubernetes, OpenShift, CI/CD, and infrastructure expertise"
+    endpoint: https://platform.redhat.com/librarian
+    type: specialist
+    team: platform-engineering
+    parent: global-assistant
+    
+    capabilities:
+      - kubernetes.operations
+      - kubernetes.troubleshooting
+      - openshift.deployment
+      - openshift.configuration
+      - cicd.jenkins
+      - cicd.tekton
+      - infrastructure.terraform
+      
+    data_sources:
+      - name: "Platform Wiki"
+        type: documentation
+        url: https://wiki.redhat.com/platform
+        
+      - name: "Jenkins API"
+        type: api
+        url: https://jenkins.redhat.com/api
+        
+      - name: "ArgoCD"
+        type: api
+        url: https://argo.redhat.com/api
+        
+    delegates_to:
+      - k8s-expert
+      - openshift-expert
+      
+    resilience:
+      circuit_breaker:
+        error_threshold_percent: 50
+        timeout_ms: 5000
+        reset_timeout_ms: 30000
+      fallback:
+        - type: cache
+          config:
+            ttl_minutes: 60
+        - type: static
+          config:
+            response: "Platform team is experiencing issues. Please check https://status.redhat.com"
+
+  # Security Team
+  - id: security-team
+    name: "Product Security"
+    description: "Security vulnerabilities, compliance, and best practices"
+    endpoint: https://security.redhat.com/librarian
+    type: specialist
+    team: product-security
+    parent: global-assistant
+    
+    capabilities:
+      - security.vulnerabilities
+      - security.compliance
+      - security.authentication
+      - security.authorization
+      - security.encryption
+      
+    data_sources:
+      - name: "CVE Database"
+        type: database
+        config:
+          connection_string: "${SECURITY_DB_URL}"
+          
+      - name: "Security KB"
+        type: documentation
+        url: https://access.redhat.com/security
+        
+    resilience:
+      circuit_breaker:
+        error_threshold_percent: 30  # More sensitive for security
+        timeout_ms: 10000
+        reset_timeout_ms: 60000
+
+  # ==================================================
+  # DEEP EXPERTS
+  # ==================================================
+  
+  # Kubernetes Expert
+  - id: k8s-expert
+    name: "Kubernetes Deep Expert"
+    description: "Expert-level Kubernetes internals and troubleshooting"
+    endpoint: https://platform.redhat.com/experts/k8s
+    type: expert
+    team: platform-engineering
+    parent: platform-team
+    
+    capabilities:
+      - kubernetes.internals.scheduler
+      - kubernetes.internals.controller
+      - kubernetes.internals.apiserver
+      - kubernetes.debugging.advanced
+      - kubernetes.performance.tuning
+      
+    # Experts might have stricter resource limits
+    resilience:
+      timeout_ms: 15000  # Longer for complex analysis
+      
+    sla:
+      response_time_ms: 2000  # Slower but more thorough
+
+  # ==================================================
+  # LOCATION-SPECIFIC LIBRARIANS
+  # ==================================================
+  
+  # Office Information
+  - id: raleigh-office
+    name: "Raleigh Office Info"
+    description: "Raleigh office facilities and local information"
+    endpoint: https://offices.redhat.com/raleigh
+    type: location
+    parent: usa-hr
+    
+    capabilities:
+      - office.facilities
+      - office.parking
+      - office.cafeteria
+      - local.transportation
+      
+    context:
+      location:
+        city: Raleigh
+        state: NC
+        country: USA
+        timezone: EST
+      facilities:
+        buildings: ["Tower 1", "Tower 2"]
+        capacity: 2000
+
+  # ==================================================
+  # EMERGENCY RESPONDERS
+  # ==================================================
+  
+  # Incident Commander
+  - id: incident-commander
+    name: "Incident Response Commander"
+    description: "Coordinates critical incident response"
+    endpoint: https://incidents.redhat.com/commander
+    type: emergency
+    parent: global-assistant
+    
+    capabilities:
+      - incident.triage
+      - incident.coordination
+      - incident.communication
+      
+    activation:
+      keywords: ["outage", "critical", "down", "emergency"]
+      priority: critical
+      auto_escalate: true
+      
+    delegates_to:
+      - platform-oncall
+      - security-oncall
+      - executive-briefing
+      
+    # No circuit breaker for emergencies
+    resilience:
+      circuit_breaker:
+        enabled: false
+      retry:
+        max_attempts: 5  # Try harder for emergencies
+
+# ==================================================
+# GLOBAL CONFIGURATION
+# ==================================================
+config:
+  refresh_interval_minutes: 5      # Check for updates frequently
+  default_timeout_ms: 5000
+  max_delegation_depth: 10
+  routing_ai_model: "gpt-4"
+  fallback_on_error: "global-assistant"
+  
+  health_check:
+    enabled: true
+    interval_minutes: 2
+    timeout_ms: 1000
+    endpoint: "/health"

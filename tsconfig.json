@@ -1,0 +1,78 @@
+{
+  "compilerOptions": {
+    // Language and Environment
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "commonjs",
+    
+    // Modules
+    "moduleResolution": "node",
+    "baseUrl": "./",
+    "paths": {
+      "@interfaces/*": ["interfaces/*"],
+      "@core/*": ["src/core/*"],
+      "@librarians/*": ["src/librarians/*"],
+      "@ai/*": ["src/ai/*"],
+      "@observability/*": ["src/observability/*"]
+    },
+    "resolveJsonModule": true,
+    
+    // JavaScript Support
+    "allowJs": false,
+    "checkJs": false,
+    
+    // Emit
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "outDir": "./dist",
+    "removeComments": false,
+    "importHelpers": true,
+    
+    // Type Checking
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
+    "strictFunctionTypes": true,
+    "strictBindCallApply": true,
+    "strictPropertyInitialization": true,
+    "noImplicitThis": true,
+    "useUnknownInCatchVariables": true,
+    "alwaysStrict": true,
+    "exactOptionalPropertyTypes": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "allowUnreachableCode": false,
+    "allowUnusedLabels": false,
+    
+    // Interop Constraints
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "forceConsistentCasingInFileNames": true,
+    
+    // Skip Lib Check
+    "skipLibCheck": true,
+    
+    // Advanced
+    "preserveWatchOutput": true,
+    "assumeChangesOnlyAffectDirectDependencies": true
+  },
+  "include": [
+    "src/**/*",
+    "interfaces/**/*",
+    "tests/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "coverage",
+    "**/*.spec.ts",
+    "**/*.test.ts"
+  ],
+  "ts-node": {
+    "require": ["tsconfig-paths/register"]
+  }
+}
