@@ -10,6 +10,7 @@ import { runMCPServer } from './mcp/server';
 import { createLibrarian } from './types/librarian-factory';
 import { createAIClientFromEnv } from './ai/client';
 import { loadLibrarians } from './registry/secure-loader';
+import { initializeTracing } from './observability';
 import pino from 'pino';
 
 const logger = pino({
@@ -28,6 +29,12 @@ async function main(): Promise<void> {
   logger.info('Starting Constellation MCP Server');
   
   console.log('🚀 Starting Constellation...\n');
+  
+  // Initialize OpenTelemetry tracing
+  initializeTracing({
+    serviceName: 'constellation',
+    enabled: process.env.TRACE_ENABLED === 'true',
+  });
 
   // Initialize AI client (optional - only if configured)
   let aiClient = null;

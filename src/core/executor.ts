@@ -8,6 +8,7 @@ import { ulid } from "ulid";
 import type { Librarian, Context, Response, TraceContext } from '../types/core';
 import type { AIClient } from '../ai/interface';
 import { isValidResponse } from '../types/librarian-factory';
+import { withSpan, addSpanAttributes, addSpanEvent, getCurrentTraceId, getCurrentSpanId, SpanKind } from '../observability';
 
 export interface ExecutorOptions {
   /** Default timeout in milliseconds */
@@ -85,36 +86,69 @@ export class LibrarianExecutor extends EventEmitter {
       timestamp: startTime,
     } as ExecuteEvent);
 
-    try {
-      // Execute with timeout if specified
-      const timeout = context.timeout ?? this.options.defaultTimeout;
-      const response = await this.executeWithTimeout(
-        librarian(query, enrichedContext),
-        timeout,
-        query,
-      );
+    // Execute within an OpenTelemetry span
+    return withSpan(
+      `librarian.execute`,
+      async (_span) => {
+        // Add span attributes
+        addSpanAttributes({
+          'librarian.id': enrichedContext.librarian?.id || 'unknown',
+          'librarian.name': enrichedContext.librarian?.name || 'unknown',
+          'librarian.team': enrichedContext.librarian?.team || 'unknown',
+          'query.text': query.substring(0, 100), // Truncate for privacy
+          'query.length': query.length,
+          'user.id': enrichedContext.user?.id || 'anonymous',
+          'user.teams': enrichedContext.user?.teams?.join(',') || '',
+        });
 
-      // Validate response if enabled
-      if (this.options.validateResponses) {
-        const validation = this.validateResponse(response);
-        if (!validation.isValid) {
-          return this.createErrorResponse('INVALID_RESPONSE', validation.error ?? 'Invalid response', {
+        try {
+          // Execute with timeout if specified
+          const timeout = context.timeout ?? this.options.defaultTimeout;
+          
+          addSpanEvent('librarian.execution.start');
+          
+          const response = await this.executeWithTimeout(
+            librarian(query, enrichedContext),
+            timeout,
             query,
-            librarian: context.librarian?.id,
-            response,
-          });
-        }
-      }
+          );
 
-      // Add execution metadata
-      const executionTimeMs = Date.now() - startTime;
-      const enhancedResponse: Response = {
-        ...response,
-        metadata: {
-          ...response.metadata,
-          executionTimeMs,
-        },
-      };
+          addSpanEvent('librarian.execution.complete');
+
+          // Validate response if enabled
+          if (this.options.validateResponses) {
+            const validation = this.validateResponse(response);
+            if (!validation.isValid) {
+              addSpanEvent('response.validation.failed', {
+                error: validation.error,
+              });
+              return this.createErrorResponse('INVALID_RESPONSE', validation.error ?? 'Invalid response', {
+                query,
+                librarian: context.librarian?.id,
+                response,
+              });
+            }
+          }
+
+          // Add execution metadata
+          const executionTimeMs = Date.now() - startTime;
+          const enhancedResponse: Response = {
+            ...response,
+            metadata: {
+              ...response.metadata,
+              executionTimeMs,
+              traceId: enrichedContext.trace?.traceId,
+            },
+          };
+
+          // Add response attributes to span
+          addSpanAttributes({
+            'response.has_answer': !!enhancedResponse.answer,
+            'response.has_error': !!enhancedResponse.error,
+            'response.has_delegate': !!enhancedResponse.delegate,
+            'response.confidence': enhancedResponse.confidence || 0,
+            'response.execution_time_ms': executionTimeMs,
+          });
 
       // Emit complete event
       this.emit('execute:complete', {
@@ -126,26 +160,52 @@ export class LibrarianExecutor extends EventEmitter {
       } as CompleteEvent);
 
       return enhancedResponse;
-    } catch (error) {
-      const errorResponse = this.handleExecutionError(error as Error, query, enrichedContext);
-      
-      // Emit error event
-      this.emit('execute:error', {
-        query,
-        context: enrichedContext,
-        timestamp: Date.now(),
-        error: error as Error,
-        response: errorResponse,
-      } as ErrorEvent);
+        } catch (error) {
+          addSpanEvent('librarian.execution.error', {
+            error: error instanceof Error ? error.message : 'Unknown error',
+          });
+          
+          const errorResponse = this.handleExecutionError(error as Error, query, enrichedContext);
+          
+          // Emit error event
+          this.emit('execute:error', {
+            query,
+            context: enrichedContext,
+            timestamp: Date.now(),
+            error: error as Error,
+            response: errorResponse,
+          } as ErrorEvent);
 
-      return errorResponse;
-    }
+          return errorResponse;
+        }
+      },
+      {
+        kind: SpanKind.INTERNAL,
+        attributes: {
+          'component': 'librarian-executor',
+        },
+      }
+    );
   }
 
   /**
-   * Create a new trace context or child span
+   * Create a new trace context using OpenTelemetry or generate one
    */
   createTraceContext(parentTrace?: TraceContext): TraceContext {
+    // Try to use OpenTelemetry trace context first
+    const otelTraceId = getCurrentTraceId();
+    const otelSpanId = getCurrentSpanId();
+    
+    if (otelTraceId && otelSpanId) {
+      return {
+        traceId: otelTraceId,
+        spanId: otelSpanId,
+        ...(parentTrace?.spanId && { parentSpanId: parentTrace.spanId }),
+        startTime: Date.now(),
+      };
+    }
+    
+    // Fallback to manual trace context
     if (parentTrace) {
       return {
         traceId: parentTrace.traceId,
