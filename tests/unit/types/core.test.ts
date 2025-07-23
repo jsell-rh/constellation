@@ -5,8 +5,8 @@ import type {
   Response,
   ErrorInfo,
   Source,
-  AIClient,
 } from '../../../src/types/core';
+import type { AIClient } from '../../../src/ai/interface';
 
 /* eslint-disable @typescript-eslint/require-await */
 
@@ -105,9 +105,15 @@ describe('Core Types', () => {
         },
         delegationChain: ['parent-lib', 'grandparent-lib'],
         ai: {
-          complete: async (_prompt: string) => 'AI response',
-          analyze: async (_text: string, _schema: unknown) => ({}),
-        },
+          defaultProvider: { name: 'mock', getSupportedModels: () => [], isAvailable: () => true, complete: async () => ({ content: '' }), stream: async () => ({ [Symbol.asyncIterator]: async function*() {} } as any), ask: async () => '' },
+          providers: {},
+          complete: async () => ({ content: 'AI response' }),
+          stream: async () => ({ [Symbol.asyncIterator]: async function*() { yield 'response'; } } as any),
+          ask: async () => 'AI response',
+          completeWith: async () => ({ content: 'AI response' }),
+          streamWith: async () => ({ [Symbol.asyncIterator]: async function*() { yield 'response'; } } as any),
+          askWith: async () => 'AI response',
+        } as AIClient,
         availableDelegates: [
           {
             id: 'delegate1',
@@ -182,22 +188,25 @@ describe('Core Types', () => {
   describe('AIClient Type', () => {
     it('should define required AI methods', () => {
       const mockAI: AIClient = {
-        complete: async (_prompt: string) => 'completion',
-        analyze: async (_text: string, _schema: unknown) => ({ result: 'analyzed' }),
+        defaultProvider: { 
+          name: 'mock', 
+          getSupportedModels: () => [],
+          isAvailable: () => true,
+          complete: async () => ({ content: 'completion' }),
+          stream: async () => ({ [Symbol.asyncIterator]: async function*() {} } as any),
+          ask: async () => 'completion',
+        },
+        providers: {},
+        complete: async () => ({ content: 'completion' }),
+        stream: async () => ({ [Symbol.asyncIterator]: async function*() {} } as any),
+        ask: async () => 'completion',
+        completeWith: async () => ({ content: 'completion' }),
+        streamWith: async () => ({ [Symbol.asyncIterator]: async function*() {} } as any),
+        askWith: async () => 'completion',
       };
 
       expect(typeof mockAI.complete).toBe('function');
-      expect(typeof mockAI.analyze).toBe('function');
-    });
-
-    it('should support optional embed method', () => {
-      const mockAI: AIClient = {
-        complete: async (_prompt: string) => 'completion',
-        analyze: async (_text: string, _schema: unknown) => ({ result: 'analyzed' }),
-        embed: async (_text: string) => [0.1, 0.2, 0.3],
-      };
-
-      expect(typeof mockAI.embed).toBe('function');
+      expect(typeof mockAI.ask).toBe('function');
     });
   });
 });

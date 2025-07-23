@@ -3,6 +3,8 @@
  * These types enforce compile-time safety for librarian implementations
  */
 
+import type { AIClient as ConstellationAIClient } from '../ai/interface';
+
 /**
  * The fundamental librarian function type.
  * All librarians must conform to this signature.
@@ -54,7 +56,7 @@ export interface Context {
   delegationChain?: string[];
   
   /** AI client for LLM operations */
-  ai?: AIClient;
+  ai?: ConstellationAIClient;
   
   /** Available librarians for delegation */
   availableDelegates?: Delegate[];
@@ -126,36 +128,6 @@ export interface TraceContext {
   attributes?: Record<string, unknown>;
 }
 
-/**
- * AI client interface for LLM operations
- */
-export interface AIClient {
-  /** Complete a prompt and return text */
-  complete(prompt: string, options?: AIOptions): Promise<string>;
-  
-  /** Analyze text and return structured data matching schema */
-  analyze(text: string, schema: unknown): Promise<unknown>;
-  
-  /** Generate embeddings for text (optional) */
-  embed?(text: string): Promise<number[]>;
-}
-
-/**
- * Options for AI operations
- */
-export interface AIOptions {
-  /** Model to use */
-  model?: string;
-  
-  /** Temperature for randomness (0-1) */
-  temperature?: number;
-  
-  /** Maximum tokens to generate */
-  maxTokens?: number;
-  
-  /** Stop sequences */
-  stopSequences?: string[];
-}
 
 /**
  * Delegate information for available librarians

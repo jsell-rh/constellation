@@ -10,8 +10,6 @@ export type {
   LibrarianInfo,
   User,
   TraceContext,
-  AIClient,
-  AIOptions,
   Delegate,
   DelegateRequest,
   Source,

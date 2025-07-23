@@ -6,6 +6,7 @@
 import { EventEmitter } from 'events';
 import { ulid } from "ulid";
 import type { Librarian, Context, Response, TraceContext } from '../types/core';
+import type { AIClient } from '../ai/interface';
 import { isValidResponse } from '../types/librarian-factory';
 
 export interface ExecutorOptions {
@@ -13,6 +14,8 @@ export interface ExecutorOptions {
   defaultTimeout?: number;
   /** Whether to validate responses */
   validateResponses?: boolean;
+  /** AI client for LLM operations */
+  aiClient?: AIClient;
 }
 
 export interface ExecuteEvent {
@@ -40,7 +43,8 @@ export interface ValidationResult {
  * Executes librarian functions with proper context and error handling
  */
 export class LibrarianExecutor extends EventEmitter {
-  private readonly options: Required<ExecutorOptions>;
+  private readonly options: Required<Omit<ExecutorOptions, 'aiClient'>>;
+  private readonly aiClient?: AIClient;
 
   constructor(options: ExecutorOptions = {}) {
     super();
@@ -48,6 +52,9 @@ export class LibrarianExecutor extends EventEmitter {
       defaultTimeout: options.defaultTimeout ?? 30000,
       validateResponses: options.validateResponses ?? true,
     };
+    if (options.aiClient) {
+      this.aiClient = options.aiClient;
+    }
   }
 
   /**
@@ -65,6 +72,11 @@ export class LibrarianExecutor extends EventEmitter {
       ...context,
       trace: context.trace ?? this.createTraceContext(),
     };
+    
+    // Add AI client if available
+    if (this.aiClient) {
+      enrichedContext.ai = this.aiClient;
+    }
 
     // Emit start event
     this.emit('execute:start', {
