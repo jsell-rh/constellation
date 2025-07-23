@@ -33,13 +33,84 @@ export class OpenAIProvider implements AIProvider {
       ...config,
     };
 
-    this.llm = new ChatOpenAI({
-      openAIApiKey: config.apiKey,
-      ...(this.config.model && { modelName: this.config.model }),
-      ...(this.config.temperature !== undefined && { temperature: this.config.temperature }),
-      ...(this.config.maxTokens !== undefined && { maxTokens: this.config.maxTokens }),
-      ...(config.baseURL && { configuration: { baseURL: config.baseURL } }),
+    // Log configuration for debugging
+    console.log('OpenAI Provider Config:', {
+      model: this.config.model,
+      baseURL: this.config.baseURL,
+      hasApiKey: !!config.apiKey,
     });
+
+    // Check if this is Gemini
+    const isGemini = config.baseURL?.includes('generativelanguage.googleapis.com');
+
+    // For Gemini, we might need to use the exact model name
+    const modelName = this.config.model;
+
+    if (isGemini) {
+      // For Gemini, use a configuration that avoids problematic defaults
+      console.log('Using Gemini-compatible configuration');
+
+      // Create ChatOpenAI with Gemini-safe configuration
+      this.llm = new ChatOpenAI({
+        openAIApiKey: config.apiKey,
+        ...(modelName && { modelName }),
+        ...(this.config.temperature !== undefined && { temperature: this.config.temperature }),
+        ...(this.config.maxTokens !== undefined && { maxTokens: this.config.maxTokens }),
+        streaming: false,
+        configuration: {
+          baseURL: config.baseURL,
+          // Override default request options to exclude frequency_penalty
+          defaultHeaders: {},
+          defaultQuery: {},
+        },
+        // Set model kwargs that explicitly exclude frequency_penalty
+        modelKwargs: {
+          // Only include parameters that Gemini supports
+          ...(this.config.temperature !== undefined && { temperature: this.config.temperature }),
+          ...(this.config.maxTokens !== undefined && { max_tokens: this.config.maxTokens }),
+          top_p: 1,
+          presence_penalty: 0,
+          // Explicitly exclude frequency_penalty
+        },
+      });
+
+      // Monkey-patch the invoke method to filter out frequency_penalty
+      const originalInvoke = this.llm.invoke.bind(this.llm);
+      (this.llm as any).invoke = async function (messages: any, options?: any) {
+        // Remove frequency_penalty from options if present
+        if (options?.frequency_penalty !== undefined) {
+          delete options.frequency_penalty;
+        }
+        // Also check model_kwargs
+        if (options?.model_kwargs?.frequency_penalty !== undefined) {
+          delete options.model_kwargs.frequency_penalty;
+        }
+        return originalInvoke(messages, options);
+      };
+
+      // Also patch the stream method
+      const originalStream = this.llm.stream.bind(this.llm);
+      (this.llm as any).stream = async function (messages: any, options?: any) {
+        // Remove frequency_penalty from options if present
+        if (options?.frequency_penalty !== undefined) {
+          delete options.frequency_penalty;
+        }
+        // Also check model_kwargs
+        if (options?.model_kwargs?.frequency_penalty !== undefined) {
+          delete options.model_kwargs.frequency_penalty;
+        }
+        return originalStream(messages, options);
+      };
+    } else {
+      // Standard OpenAI configuration
+      this.llm = new ChatOpenAI({
+        openAIApiKey: config.apiKey,
+        ...(modelName && { modelName }),
+        ...(this.config.temperature !== undefined && { temperature: this.config.temperature }),
+        ...(this.config.maxTokens !== undefined && { maxTokens: this.config.maxTokens }),
+        ...(config.baseURL && { configuration: { baseURL: config.baseURL } }),
+      });
+    }
   }
 
   async complete(
@@ -48,12 +119,35 @@ export class OpenAIProvider implements AIProvider {
   ): Promise<AIResponse> {
     const langchainMessages = this.convertMessages(messages, options.system);
 
+    // Debug log for Gemini
+    if (this.config.baseURL?.includes('generativelanguage.googleapis.com')) {
+      console.log('Gemini Request:', {
+        messageCount: langchainMessages.length,
+        firstMessage:
+          typeof langchainMessages[0]?.content === 'string'
+            ? langchainMessages[0].content.substring(0, 100) + '...'
+            : 'Complex content',
+        options: {
+          max_tokens: options.max_tokens,
+          temperature: options.temperature,
+        },
+      });
+    }
+
     // Apply options to the LLM instance
-    const llm = this.llm.bind({
+    const bindOptions: any = {
       ...(options.max_tokens && { maxTokens: options.max_tokens }),
       ...(options.temperature !== undefined && { temperature: options.temperature }),
       ...(options.stop && { stop: options.stop }),
-    });
+    };
+
+    // For Gemini, explicitly exclude frequency_penalty from bind options
+    if (this.config.baseURL?.includes('generativelanguage.googleapis.com')) {
+      // Don't include frequency_penalty at all
+      delete bindOptions.frequencyPenalty;
+    }
+
+    const llm = this.llm.bind(bindOptions);
 
     try {
       const response = await llm.invoke(langchainMessages, {
@@ -77,7 +171,20 @@ export class OpenAIProvider implements AIProvider {
           finish_reason: response.response_metadata.finish_reason as string,
         }),
       };
-    } catch (error) {
+    } catch (error: any) {
+      // Log detailed error information for debugging
+      console.error('OpenAI Provider Error Details:', {
+        message: error.message,
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        config: {
+          baseURL: this.config.baseURL,
+          model: this.config.model,
+          apiKey: this.config.apiKey ? '***' : 'not set',
+        },
+      });
+
       throw new Error(
         `OpenAI completion failed: ${error instanceof Error ? error.message : String(error)}`,
       );
@@ -91,11 +198,19 @@ export class OpenAIProvider implements AIProvider {
     const langchainMessages = this.convertMessages(messages, options.system);
 
     // Apply options to the LLM instance
-    const llm = this.llm.bind({
+    const bindOptions: any = {
       ...(options.max_tokens && { maxTokens: options.max_tokens }),
       ...(options.temperature !== undefined && { temperature: options.temperature }),
       ...(options.stop && { stop: options.stop }),
-    });
+    };
+
+    // For Gemini, explicitly exclude frequency_penalty from bind options
+    if (this.config.baseURL?.includes('generativelanguage.googleapis.com')) {
+      // Don't include frequency_penalty at all
+      delete bindOptions.frequencyPenalty;
+    }
+
+    const llm = this.llm.bind(bindOptions);
 
     const stream = await llm.stream(langchainMessages, {
       ...(options.timeout && { timeout: options.timeout }),

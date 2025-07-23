@@ -117,6 +117,7 @@ Respond in JSON format:
       logger.debug({ query, analysis }, 'Query intent analyzed');
       return analysis;
     } catch (error) {
+      console.log('ERROR!!', error);
       logger.error({ error, query }, 'Failed to analyze query intent');
       // Fallback to simple analysis
       return {

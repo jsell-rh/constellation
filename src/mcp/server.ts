@@ -43,7 +43,7 @@ export class ConstellationMCPServer {
     this.options = {
       name: 'constellation',
       version: process.env.npm_package_version ?? '0.1.0',
-      port: 3001,
+      port: process.env.PORT ? parseInt(process.env.PORT) : 3001,
       host: 'localhost',
       ...options,
     };
@@ -53,6 +53,15 @@ export class ConstellationMCPServer {
 
     // Initialize delegation engine
     this.delegationEngine = new DelegationEngine(router);
+  }
+
+  /**
+   * Get the router's default context (includes AI client)
+   */
+  private getDefaultContext(): Partial<Context> {
+    // Access the router's defaultContext through reflection
+    // This ensures we get the AI client that was set in index.ts
+    return (this.router as any).defaultContext || {};
   }
 
   /**
@@ -121,7 +130,11 @@ Restricted librarians require user context with appropriate teams/roles.`,
       async ({ query, context }) => {
         logger.info({ query, context }, 'Processing query via delegation engine');
 
+        // Merge router's default context (includes AI client) with MCP context
+        const defaultContext = this.getDefaultContext();
+
         const constellationContext: Context = {
+          ...defaultContext, // This includes the AI client!
           metadata: {
             source: 'mcp',
             ...(context?.metadata || {}),
@@ -138,7 +151,15 @@ Restricted librarians require user context with appropriate teams/roles.`,
             }),
         };
 
-        logger.info({ constellationContext }, 'Context being passed to delegation engine');
+        logger.info(
+          {
+            constellationContext: {
+              ...constellationContext,
+              ai: constellationContext.ai ? '[AI Client Present]' : undefined,
+            },
+          },
+          'Context being passed to delegation engine',
+        );
         const response = await this.delegationEngine.route(query, constellationContext);
         return this.formatMCPResponse(response);
       },
@@ -183,7 +204,11 @@ Note: Authentication requirements depend on the librarian:
       async ({ librarian_id, query, context }) => {
         logger.info({ librarian_id, query }, 'Processing direct librarian query');
 
+        // Merge router's default context (includes AI client) with MCP context
+        const defaultContext = this.getDefaultContext();
+
         const constellationContext: Context = {
+          ...defaultContext, // This includes the AI client!
           metadata: {
             source: 'mcp',
             forced_routing: true,

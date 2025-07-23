@@ -2,18 +2,19 @@
  * AI Client implementation that manages multiple providers
  */
 
-import type { 
-  AIClient, 
-  AIProvider, 
-  AIConfiguration, 
-  AIMessage, 
-  AIResponse, 
-  AIStreamResponse, 
-  AICompletionOptions 
+import type {
+  AIClient,
+  AIProvider,
+  AIConfiguration,
+  AIMessage,
+  AIResponse,
+  AIStreamResponse,
+  AICompletionOptions,
 } from './interface';
 import { OpenAIProvider } from './providers/openai';
 import { AnthropicProvider } from './providers/anthropic';
 import { VertexAIProvider } from './providers/vertex-ai';
+import { GeminiProvider } from './providers/gemini';
 import pino from 'pino';
 
 const logger = pino({
@@ -28,38 +29,69 @@ export class ConstellationAIClient implements AIClient {
   constructor(config: AIConfiguration) {
     this.config = config;
     this.initializeProviders();
-    
+
     const defaultProviderInstance = this.providers[config.defaultProvider];
     if (!defaultProviderInstance) {
       throw new Error(`Default provider '${config.defaultProvider}' not configured or unavailable`);
     }
-    
+
     this.defaultProvider = defaultProviderInstance;
-    
-    logger.info({
-      defaultProvider: config.defaultProvider,
-      availableProviders: Object.keys(this.providers),
-    }, 'AI Client initialized');
+
+    logger.info(
+      {
+        defaultProvider: config.defaultProvider,
+        availableProviders: Object.keys(this.providers),
+      },
+      'AI Client initialized',
+    );
   }
 
   private initializeProviders(): void {
-    // Initialize OpenAI if configured
+    // Initialize OpenAI or Gemini if configured
     if (this.config.openai?.apiKey) {
       try {
-        const provider = new OpenAIProvider({
-          apiKey: this.config.openai.apiKey,
-          ...(this.config.openai.model && { model: this.config.openai.model }),
-          ...(this.config.openai.baseURL && { baseURL: this.config.openai.baseURL }),
-          ...(this.config.defaults?.temperature !== undefined && { temperature: this.config.defaults.temperature }),
-          ...(this.config.defaults?.max_tokens !== undefined && { maxTokens: this.config.defaults.max_tokens }),
-        });
-        
-        if (provider.isAvailable()) {
-          this.providers.openai = provider;
-          logger.debug('OpenAI provider initialized');
+        // Check if this is actually Gemini based on the baseURL
+        const isGemini = this.config.openai.baseURL?.includes('generativelanguage.googleapis.com');
+
+        if (isGemini) {
+          // Use Gemini provider for Google's API
+          const provider = new GeminiProvider({
+            apiKey: this.config.openai.apiKey,
+            ...(this.config.openai.model && { model: this.config.openai.model }),
+            ...(this.config.openai.baseURL && { baseURL: this.config.openai.baseURL }),
+            ...(this.config.defaults?.temperature !== undefined && {
+              temperature: this.config.defaults.temperature,
+            }),
+            ...(this.config.defaults?.max_tokens !== undefined && {
+              maxTokens: this.config.defaults.max_tokens,
+            }),
+          });
+
+          if (provider.isAvailable()) {
+            this.providers.openai = provider; // Still register as 'openai' for compatibility
+            logger.debug('Gemini provider initialized (via OpenAI configuration)');
+          }
+        } else {
+          // Use standard OpenAI provider
+          const provider = new OpenAIProvider({
+            apiKey: this.config.openai.apiKey,
+            ...(this.config.openai.model && { model: this.config.openai.model }),
+            ...(this.config.openai.baseURL && { baseURL: this.config.openai.baseURL }),
+            ...(this.config.defaults?.temperature !== undefined && {
+              temperature: this.config.defaults.temperature,
+            }),
+            ...(this.config.defaults?.max_tokens !== undefined && {
+              maxTokens: this.config.defaults.max_tokens,
+            }),
+          });
+
+          if (provider.isAvailable()) {
+            this.providers.openai = provider;
+            logger.debug('OpenAI provider initialized');
+          }
         }
       } catch (error) {
-        logger.warn({ error }, 'Failed to initialize OpenAI provider');
+        logger.warn({ error }, 'Failed to initialize OpenAI/Gemini provider');
       }
     }
 
@@ -69,10 +101,14 @@ export class ConstellationAIClient implements AIClient {
         const provider = new AnthropicProvider({
           apiKey: this.config.anthropic.apiKey,
           ...(this.config.anthropic.model && { model: this.config.anthropic.model }),
-          ...(this.config.defaults?.temperature !== undefined && { temperature: this.config.defaults.temperature }),
-          ...(this.config.defaults?.max_tokens !== undefined && { maxTokens: this.config.defaults.max_tokens }),
+          ...(this.config.defaults?.temperature !== undefined && {
+            temperature: this.config.defaults.temperature,
+          }),
+          ...(this.config.defaults?.max_tokens !== undefined && {
+            maxTokens: this.config.defaults.max_tokens,
+          }),
         });
-        
+
         if (provider.isAvailable()) {
           this.providers.anthropic = provider;
           logger.debug('Anthropic provider initialized');
@@ -89,11 +125,17 @@ export class ConstellationAIClient implements AIClient {
           projectId: this.config.vertexAI.projectId,
           location: this.config.vertexAI.location,
           ...(this.config.vertexAI.model && { model: this.config.vertexAI.model }),
-          ...(this.config.vertexAI.credentials && { credentials: this.config.vertexAI.credentials }),
-          ...(this.config.defaults?.temperature !== undefined && { temperature: this.config.defaults.temperature }),
-          ...(this.config.defaults?.max_tokens !== undefined && { maxTokens: this.config.defaults.max_tokens }),
+          ...(this.config.vertexAI.credentials && {
+            credentials: this.config.vertexAI.credentials,
+          }),
+          ...(this.config.defaults?.temperature !== undefined && {
+            temperature: this.config.defaults.temperature,
+          }),
+          ...(this.config.defaults?.max_tokens !== undefined && {
+            maxTokens: this.config.defaults.max_tokens,
+          }),
         });
-        
+
         if (provider.isAvailable()) {
           this.providers['vertex-ai'] = provider;
           logger.debug('Vertex AI provider initialized');
@@ -113,7 +155,10 @@ export class ConstellationAIClient implements AIClient {
     return this.defaultProvider.complete(messages, finalOptions);
   }
 
-  async stream(messages: AIMessage[], options: AICompletionOptions = {}): Promise<AIStreamResponse> {
+  async stream(
+    messages: AIMessage[],
+    options: AICompletionOptions = {},
+  ): Promise<AIStreamResponse> {
     const finalOptions = this.mergeOptions(options);
     return this.defaultProvider.stream(messages, finalOptions);
   }
@@ -123,19 +168,31 @@ export class ConstellationAIClient implements AIClient {
     return this.defaultProvider.ask(prompt, finalOptions);
   }
 
-  async completeWith(provider: string, messages: AIMessage[], options: AICompletionOptions = {}): Promise<AIResponse> {
+  async completeWith(
+    provider: string,
+    messages: AIMessage[],
+    options: AICompletionOptions = {},
+  ): Promise<AIResponse> {
     const providerInstance = this.getProvider(provider);
     const finalOptions = this.mergeOptions(options);
     return providerInstance.complete(messages, finalOptions);
   }
 
-  async streamWith(provider: string, messages: AIMessage[], options: AICompletionOptions = {}): Promise<AIStreamResponse> {
+  async streamWith(
+    provider: string,
+    messages: AIMessage[],
+    options: AICompletionOptions = {},
+  ): Promise<AIStreamResponse> {
     const providerInstance = this.getProvider(provider);
     const finalOptions = this.mergeOptions(options);
     return providerInstance.stream(messages, finalOptions);
   }
 
-  async askWith(provider: string, prompt: string, options: AICompletionOptions = {}): Promise<string> {
+  async askWith(
+    provider: string,
+    prompt: string,
+    options: AICompletionOptions = {},
+  ): Promise<string> {
     const providerInstance = this.getProvider(provider);
     const finalOptions = this.mergeOptions(options);
     return providerInstance.ask(prompt, finalOptions);
@@ -170,7 +227,11 @@ export class ConstellationAIClient implements AIClient {
   private getProvider(provider: string): AIProvider {
     const providerInstance = this.providers[provider];
     if (!providerInstance) {
-      throw new Error(`Provider '${provider}' not found. Available providers: ${Object.keys(this.providers).join(', ')}`);
+      throw new Error(
+        `Provider '${provider}' not found. Available providers: ${Object.keys(this.providers).join(
+          ', ',
+        )}`,
+      );
     }
     return providerInstance;
   }
@@ -180,8 +241,12 @@ export class ConstellationAIClient implements AIClient {
    */
   private mergeOptions(options: AICompletionOptions): AICompletionOptions {
     return {
-      ...(this.config.defaults?.temperature !== undefined && { temperature: this.config.defaults.temperature }),
-      ...(this.config.defaults?.max_tokens !== undefined && { max_tokens: this.config.defaults.max_tokens }),
+      ...(this.config.defaults?.temperature !== undefined && {
+        temperature: this.config.defaults.temperature,
+      }),
+      ...(this.config.defaults?.max_tokens !== undefined && {
+        max_tokens: this.config.defaults.max_tokens,
+      }),
       ...(this.config.defaults?.timeout !== undefined && { timeout: this.config.defaults.timeout }),
       ...options,
     };
@@ -193,7 +258,8 @@ export class ConstellationAIClient implements AIClient {
  */
 export function createAIClientFromEnv(): ConstellationAIClient {
   const config: AIConfiguration = {
-    defaultProvider: (process.env.AI_DEFAULT_PROVIDER as 'openai' | 'anthropic' | 'vertex-ai') ?? 'openai',
+    defaultProvider:
+      (process.env.AI_DEFAULT_PROVIDER as 'openai' | 'anthropic' | 'vertex-ai') ?? 'openai',
   };
 
   // OpenAI configuration
@@ -219,7 +285,9 @@ export function createAIClientFromEnv(): ConstellationAIClient {
       projectId: process.env.GOOGLE_PROJECT_ID,
       location: process.env.GOOGLE_LOCATION ?? 'us-central1',
       ...(process.env.GOOGLE_MODEL && { model: process.env.GOOGLE_MODEL }),
-      ...(process.env.GOOGLE_APPLICATION_CREDENTIALS && { credentials: process.env.GOOGLE_APPLICATION_CREDENTIALS }),
+      ...(process.env.GOOGLE_APPLICATION_CREDENTIALS && {
+        credentials: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+      }),
     };
   }
 
