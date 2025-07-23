@@ -4,7 +4,6 @@
 
 import { describe, it, expect, beforeEach, jest } from '@jest/globals';
 import { CircuitBreaker } from '../../../src/resilience/circuit-breaker';
-import type { Response } from '../../../src/types/core';
 
 describe('CircuitBreaker', () => {
   let breaker: CircuitBreaker;
@@ -38,13 +37,13 @@ describe('CircuitBreaker', () => {
       // One success, one failure - 50% failure rate but below volume threshold
       await breaker.execute(() => Promise.resolve('success'));
       try {
-        await breaker.execute(async () => {
+        await breaker.execute(() => {
           throw new Error('test error');
         });
       } catch {
         // Expected
       }
-      
+
       expect(breaker.getState().status).toBe('closed');
     });
   });
@@ -53,17 +52,17 @@ describe('CircuitBreaker', () => {
     it('should open when failure threshold is exceeded', async () => {
       // Need at least 3 requests (volumeThreshold) with 50% failure rate
       await breaker.execute(() => Promise.resolve('success'));
-      
+
       for (let i = 0; i < 2; i++) {
         try {
-          await breaker.execute(async () => {
+          await breaker.execute(() => {
             throw new Error('test error');
           });
         } catch {
           // Expected
         }
       }
-      
+
       expect(breaker.getState().status).toBe('open');
     });
 
@@ -72,23 +71,23 @@ describe('CircuitBreaker', () => {
       await breaker.execute(() => Promise.resolve('success'));
       for (let i = 0; i < 2; i++) {
         try {
-          await breaker.execute(async () => {
+          await breaker.execute(() => {
             throw new Error('test error');
           });
         } catch {
           // Expected
         }
       }
-      
+
       // Should reject with circuit breaker error
-      try {
-        await breaker.execute(() => Promise.resolve('should not execute'));
-        fail('Should have thrown');
-      } catch (error) {
-        const response = error as Response;
-        expect(response.error?.code).toBe('CIRCUIT_BREAKER_OPEN');
-        expect(response.error?.recoverable).toBe(true);
-      }
+      await expect(
+        breaker.execute(() => Promise.resolve('should not execute')),
+      ).rejects.toMatchObject({
+        error: {
+          code: 'CIRCUIT_BREAKER_OPEN',
+          recoverable: true,
+        },
+      });
     });
   });
 
@@ -106,19 +105,19 @@ describe('CircuitBreaker', () => {
       await breaker.execute(() => Promise.resolve('success'));
       for (let i = 0; i < 2; i++) {
         try {
-          await breaker.execute(async () => {
+          await breaker.execute(() => {
             throw new Error('test error');
           });
         } catch {
           // Expected
         }
       }
-      
+
       expect(breaker.getState().status).toBe('open');
-      
+
       // Advance time past timeout
       jest.advanceTimersByTime(2001);
-      
+
       // Next request should be allowed (half-open)
       const result = await breaker.execute(() => Promise.resolve('success'));
       expect(result).toBe('success');
@@ -130,21 +129,21 @@ describe('CircuitBreaker', () => {
       await breaker.execute(() => Promise.resolve('success'));
       for (let i = 0; i < 2; i++) {
         try {
-          await breaker.execute(async () => {
+          await breaker.execute(() => {
             throw new Error('test error');
           });
         } catch {
           // Expected
         }
       }
-      
+
       // Move to half-open
       jest.advanceTimersByTime(2001);
-      
+
       // Need 2 successes to close
       await breaker.execute(() => Promise.resolve('success'));
       expect(breaker.getState().status).toBe('half-open');
-      
+
       await breaker.execute(() => Promise.resolve('success'));
       expect(breaker.getState().status).toBe('closed');
     });
@@ -154,28 +153,28 @@ describe('CircuitBreaker', () => {
       await breaker.execute(() => Promise.resolve('success'));
       for (let i = 0; i < 2; i++) {
         try {
-          await breaker.execute(async () => {
+          await breaker.execute(() => {
             throw new Error('test error');
           });
         } catch {
           // Expected
         }
       }
-      
+
       // Move to half-open
       jest.advanceTimersByTime(2001);
       await breaker.execute(() => Promise.resolve('success'));
       expect(breaker.getState().status).toBe('half-open');
-      
+
       // Failure should reopen
       try {
-        await breaker.execute(async () => {
+        await breaker.execute(() => {
           throw new Error('test error');
         });
       } catch {
         // Expected
       }
-      
+
       expect(breaker.getState().status).toBe('open');
     });
   });
@@ -184,15 +183,15 @@ describe('CircuitBreaker', () => {
     it('should track metrics correctly', async () => {
       await breaker.execute(() => Promise.resolve('success'));
       await breaker.execute(() => Promise.resolve('success'));
-      
+
       try {
-        await breaker.execute(async () => {
+        await breaker.execute(() => {
           throw new Error('test error');
         });
       } catch {
         // Expected
       }
-      
+
       const metrics = breaker.getMetrics();
       expect(metrics.totalRequests).toBe(3);
       expect(metrics.successfulRequests).toBe(2);
@@ -205,25 +204,25 @@ describe('CircuitBreaker', () => {
     it('should allow manual open', async () => {
       breaker.open();
       expect(breaker.getState().status).toBe('open');
-      
-      try {
-        await breaker.execute(() => Promise.resolve('should not execute'));
-        fail('Should have thrown');
-      } catch (error) {
-        const response = error as Response;
-        expect(response.error?.code).toBe('CIRCUIT_BREAKER_OPEN');
-      }
+
+      await expect(
+        breaker.execute(() => Promise.resolve('should not execute')),
+      ).rejects.toMatchObject({
+        error: {
+          code: 'CIRCUIT_BREAKER_OPEN',
+        },
+      });
     });
 
     it('should allow manual close', async () => {
       // Open the circuit
       breaker.open();
       expect(breaker.getState().status).toBe('open');
-      
+
       // Manual close
       breaker.close();
       expect(breaker.getState().status).toBe('closed');
-      
+
       // Should allow execution
       const result = await breaker.execute(() => Promise.resolve('success'));
       expect(result).toBe('success');
@@ -233,22 +232,22 @@ describe('CircuitBreaker', () => {
   describe('Events', () => {
     it('should emit state change events', async () => {
       const stateChanges: string[] = [];
-      breaker.on('stateChange', (event) => {
+      breaker.on('stateChange', (event: { from: string; to: string }) => {
         stateChanges.push(`${event.from}->${event.to}`);
       });
-      
+
       // Open the circuit
       await breaker.execute(() => Promise.resolve('success'));
       for (let i = 0; i < 2; i++) {
         try {
-          await breaker.execute(async () => {
+          await breaker.execute(() => {
             throw new Error('test error');
           });
         } catch {
           // Expected
         }
       }
-      
+
       expect(stateChanges).toContain('closed->open');
     });
 
@@ -257,17 +256,17 @@ describe('CircuitBreaker', () => {
       breaker.on('rejected', () => {
         rejectionCount++;
       });
-      
+
       // Open the circuit
       breaker.open();
-      
+
       // Try to execute
       try {
         await breaker.execute(() => Promise.resolve('should not execute'));
       } catch {
         // Expected
       }
-      
+
       expect(rejectionCount).toBe(1);
     });
   });

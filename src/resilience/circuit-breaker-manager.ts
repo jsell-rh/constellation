@@ -14,7 +14,7 @@ const logger = pino({
 export interface CircuitBreakerManagerConfig {
   /** Default configuration for all circuit breakers */
   defaults?: Partial<CircuitBreakerConfig>;
-  
+
   /** Enable circuit breakers globally */
   enabled?: boolean;
 }
@@ -41,7 +41,7 @@ export class CircuitBreakerManager extends EventEmitter {
     }
 
     let breaker = this.breakers.get(librarianId);
-    
+
     if (!breaker) {
       breaker = new CircuitBreaker({
         name: librarianId,
@@ -51,40 +51,52 @@ export class CircuitBreakerManager extends EventEmitter {
 
       // Forward events from individual breakers
       breaker.on('stateChange', (event) => {
-        logger.info({
-          circuitBreaker: librarianId,
-          ...event,
-        }, 'Circuit breaker state changed');
-        
+        logger.info(
+          {
+            circuitBreaker: librarianId,
+            ...event,
+          },
+          'Circuit breaker state changed',
+        );
+
         this.emit('stateChange', event);
       });
 
       breaker.on('rejected', (event) => {
-        logger.warn({
-          circuitBreaker: librarianId,
-          ...event,
-        }, 'Request rejected by circuit breaker');
-        
+        logger.warn(
+          {
+            circuitBreaker: librarianId,
+            ...event,
+          },
+          'Request rejected by circuit breaker',
+        );
+
         this.emit('rejected', event);
       });
 
-      breaker.on('failure', (event) => {
-        logger.debug({
-          circuitBreaker: librarianId,
-          duration: event.duration,
-          state: event.state,
-        }, 'Request failed');
-        
+      breaker.on('failure', (event: { duration?: number; state?: string }) => {
+        logger.debug(
+          {
+            circuitBreaker: librarianId,
+            duration: event.duration,
+            state: event.state,
+          },
+          'Request failed',
+        );
+
         this.emit('failure', event);
       });
 
-      breaker.on('success', (event) => {
-        logger.debug({
-          circuitBreaker: librarianId,
-          duration: event.duration,
-          state: event.state,
-        }, 'Request succeeded');
-        
+      breaker.on('success', (event: { duration?: number; state?: string }) => {
+        logger.debug(
+          {
+            circuitBreaker: librarianId,
+            duration: event.duration,
+            state: event.state,
+          },
+          'Request succeeded',
+        );
+
         this.emit('success', event);
       });
 
@@ -111,11 +123,11 @@ export class CircuitBreakerManager extends EventEmitter {
    */
   getAllMetrics(): Record<string, ReturnType<CircuitBreaker['getMetrics']>> {
     const metrics: Record<string, ReturnType<CircuitBreaker['getMetrics']>> = {};
-    
+
     for (const [id, breaker] of this.breakers) {
       metrics[id] = breaker.getMetrics();
     }
-    
+
     return metrics;
   }
 
@@ -124,11 +136,11 @@ export class CircuitBreakerManager extends EventEmitter {
    */
   getAllStates(): Record<string, ReturnType<CircuitBreaker['getState']>> {
     const states: Record<string, ReturnType<CircuitBreaker['getState']>> = {};
-    
+
     for (const [id, breaker] of this.breakers) {
       states[id] = breaker.getState();
     }
-    
+
     return states;
   }
 
@@ -191,7 +203,7 @@ export function getCircuitBreakerManager(): CircuitBreakerManager {
       },
     });
   }
-  
+
   return globalManager;
 }
 
