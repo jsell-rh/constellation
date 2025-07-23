@@ -1,0 +1,110 @@
+# Constellation Secure Registry Example
+# Shows how teams register librarians with proper security
+
+version: "1.0"
+
+librarians:
+  # Public librarian - no auth required
+  - id: public-docs
+    name: Documentation Helper
+    function: ./examples/librarians/docs-librarian.ts
+    team: platform
+    description: Answers questions about our documentation
+    permissions:
+      public: true  # Anyone can access
+
+  # Team-restricted librarian
+  - id: deployment-assistant
+    name: Deployment Assistant
+    function: ./examples/librarians/deployment-librarian.ts
+    team: platform
+    description: Helps with Kubernetes deployments
+    permissions:
+      allowedTeams: [platform, sre, devops]
+    performance:
+      timeout: 30000  # 30 second timeout for complex operations
+
+  # Sensitive data librarian
+  - id: hr-assistant
+    name: HR Assistant
+    function: ./examples/librarians/hr-librarian.ts
+    team: human-resources
+    description: Answers HR-related questions
+    permissions:
+      allowedTeams: [human-resources, management]
+      allowedRoles: [hr-admin, manager]
+      sensitiveData: true  # Extra audit logging
+
+  # Financial data with caching
+  - id: finance-reports
+    name: Financial Reports
+    function: ./examples/librarians/finance-librarian.ts
+    team: finance
+    description: Provides financial reports and insights
+    permissions:
+      allowedTeams: [finance, executives]
+      allowedRoles: [finance-analyst, cfo, ceo]
+      sensitiveData: true
+    performance:
+      cache: 300  # Cache for 5 minutes
+      rateLimit: 10  # Max 10 requests per minute per user
+
+  # Cross-team collaboration
+  - id: incident-response
+    name: Incident Response Guide
+    function: ./examples/librarians/incident-librarian.ts
+    team: sre
+    description: Helps during production incidents
+    permissions:
+      allowedTeams: [sre, platform, security, support]
+      allowedRoles: [on-call]
+    performance:
+      cache: false  # Always fresh data during incidents
+      timeout: 5000  # Fast responses needed
+
+  # AI-powered with restrictions
+  - id: code-reviewer
+    name: AI Code Reviewer
+    function: ./examples/librarians/code-review-librarian.ts
+    team: engineering
+    description: Reviews code for security and quality issues
+    permissions:
+      allowedTeams: [engineering, security]
+      allowedRoles: [developer, tech-lead]
+    performance:
+      timeout: 60000  # 1 minute for thorough analysis
+
+  # Customer-facing with rate limits
+  - id: customer-support
+    name: Customer Support Bot
+    function: ./examples/librarians/support-librarian.ts
+    team: support
+    description: Helps customers with common questions
+    permissions:
+      allowedTeams: [support, success]
+      allowedRoles: [support-agent, customer-success]
+    performance:
+      cache: 3600  # Cache FAQ answers for 1 hour
+      rateLimit: 100  # Prevent abuse
+
+# Example of how librarian functions still stay simple:
+#
+# // deployment-librarian.ts
+# export default async function deploymentLibrarian(query: string, context: Context) {
+#   // Context already has authenticated user info!
+#   const deployments = await k8sClient.getDeployments(context.user.teams);
+#   
+#   if (query.includes('status')) {
+#     return { answer: formatDeploymentStatus(deployments) };
+#   }
+#   
+#   if (query.includes('rollback')) {
+#     // Only SRE team can suggest rollbacks
+#     if (!context.user.teams?.includes('sre')) {
+#       return { error: { message: 'Rollback advice requires SRE team membership' } };
+#     }
+#     return { answer: analyzeRollbackOptions(deployments) };
+#   }
+#   
+#   return { answer: 'I can help with deployment status and rollback advice.' };
+# }

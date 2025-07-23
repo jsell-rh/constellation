@@ -101,6 +101,12 @@ export interface User {
   /** User ID */
   id: string;
   
+  /** User email */
+  email?: string;
+  
+  /** Teams the user belongs to */
+  teams?: string[];
+  
   /** User roles for authorization */
   roles?: string[];
   
