@@ -119,7 +119,7 @@ Restricted librarians require user context with appropriate teams/roles.`,
         },
       },
       async ({ query, context }) => {
-        logger.info({ query }, 'Processing query via delegation engine');
+        logger.info({ query, context }, 'Processing query via delegation engine');
 
         const constellationContext: Context = {
           metadata: {
@@ -138,6 +138,7 @@ Restricted librarians require user context with appropriate teams/roles.`,
             }),
         };
 
+        logger.info({ constellationContext }, 'Context being passed to delegation engine');
         const response = await this.delegationEngine.route(query, constellationContext);
         return this.formatMCPResponse(response);
       },

@@ -125,6 +125,18 @@ function validateLibrarianEntry(entry: SecureLibrarianEntry): void {
  */
 function createSecureLibrarian(librarianFn: Librarian, entry: SecureLibrarianEntry): Librarian {
   return async (query: string, context?: Context): Promise<Response> => {
+    logger.debug(
+      {
+        librarianId: entry.id,
+        hasContext: !!context,
+        hasUser: !!context?.user,
+        userId: context?.user?.id,
+        userTeams: context?.user?.teams,
+        permissions: entry.permissions,
+      },
+      'Secure librarian auth check',
+    );
+
     // Public librarians bypass auth
     if (entry.permissions?.public) {
       return librarianFn(query, context);
@@ -132,7 +144,7 @@ function createSecureLibrarian(librarianFn: Librarian, entry: SecureLibrarianEnt
 
     // Check authentication
     if (!context?.user) {
-      logger.warn({ librarianId: entry.id }, 'Unauthenticated access attempt');
+      logger.warn({ librarianId: entry.id, context }, 'Unauthenticated access attempt');
       return {
         error: {
           code: 'UNAUTHENTICATED',

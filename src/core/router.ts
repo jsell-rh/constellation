@@ -6,6 +6,11 @@
 import { LibrarianExecutor } from './executor';
 import type { Librarian, Context, Response, LibrarianInfo } from '../types/core';
 import { errorResponse } from '../types/librarian-factory';
+import pino from 'pino';
+
+const logger = pino({
+  level: process.env.LOG_LEVEL ?? 'info',
+});
 
 export interface RouterOptions {
   /** Executor instance to use for routing */
@@ -45,11 +50,7 @@ export class SimpleRouter {
   /**
    * Route a query to a specific librarian
    */
-  async route(
-    query: string,
-    librarianId: string,
-    context: Context = {},
-  ): Promise<Response> {
+  async route(query: string, librarianId: string, context: Context = {}): Promise<Response> {
     // Get the librarian
     const librarian = this.librarians.get(librarianId);
     if (!librarian) {
@@ -68,6 +69,16 @@ export class SimpleRouter {
       ...context,
       ...(librarianInfo && { librarian: librarianInfo }),
     };
+
+    logger.debug(
+      {
+        librarianId,
+        hasUser: !!enrichedContext.user,
+        userId: enrichedContext.user?.id,
+        userTeams: enrichedContext.user?.teams,
+      },
+      'Router passing context to executor',
+    );
 
     // Execute using the executor
     return this.executor.execute(librarian, query, enrichedContext);
@@ -99,17 +110,17 @@ export class SimpleRouter {
    */
   findByCapability(capability: string): LibrarianInfo[] {
     const matches: LibrarianInfo[] = [];
-    
+
     for (const [_id, info] of this.metadata.entries()) {
-      const hasCapability = info.capabilities.some(cap => 
-        cap.includes(capability) || capability.includes(cap)
+      const hasCapability = info.capabilities.some(
+        (cap) => cap.includes(capability) || capability.includes(cap),
       );
-      
+
       if (hasCapability) {
         matches.push(info);
       }
     }
-    
+
     return matches;
   }
 
@@ -140,7 +151,7 @@ export class SimpleRouter {
       throw new Error('Invalid metadata: capabilities must be an array');
     }
 
-    if (metadata.capabilities.some(cap => typeof cap !== 'string')) {
+    if (metadata.capabilities.some((cap) => typeof cap !== 'string')) {
       throw new Error('Invalid metadata: all capabilities must be strings');
     }
   }
