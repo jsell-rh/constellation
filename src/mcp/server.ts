@@ -6,10 +6,12 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { SimpleRouter } from '../core/router';
-import type { Context, Response } from '../types/core';
+import type { Context, Response, User } from '../types/core';
 import { DelegationEngine } from '../delegation/engine';
+import { createJWTMiddleware, getAuthConfig, getUserFromRequest } from '../auth/jwt-middleware';
 import pino from 'pino';
 import { z } from 'zod';
+import type { Request, Response as ExpressResponse } from 'express';
 
 const logger = pino({
   level: process.env.LOG_LEVEL ?? 'info',
@@ -56,7 +58,7 @@ export class ConstellationMCPServer {
   /**
    * Create a new MCP server instance (for stateless mode)
    */
-  private createServerInstance(): McpServer {
+  private createServerInstance(user?: User): McpServer {
     const server = new McpServer({
       name: this.options.name ?? 'constellation',
       version: this.options.version ?? '0.1.0'
@@ -68,7 +70,7 @@ export class ConstellationMCPServer {
     });
 
     // Register tools and resources on each new instance
-    this.registerToolsOnServer(server);
+    this.registerToolsOnServer(server, user);
     this.registerResourcesOnServer(server);
     
     return server;
@@ -77,7 +79,7 @@ export class ConstellationMCPServer {
   /**
    * Register tools on a server instance
    */
-  private registerToolsOnServer(server: McpServer): void {
+  private registerToolsOnServer(server: McpServer, user?: User): void {
     // Register the main query tool
     server.registerTool(
       'query',
@@ -101,7 +103,8 @@ export class ConstellationMCPServer {
             source: 'mcp',
             ...(context?.metadata || {})
           },
-          ...(context?.user_id && { user: { id: context.user_id } })
+          // Use authenticated user if available, otherwise fall back to context user_id
+          user: user || (context?.user_id ? { id: context.user_id } : undefined)
         };
 
         const response = await this.delegationEngine.route(query, constellationContext);
@@ -134,7 +137,8 @@ export class ConstellationMCPServer {
             forced_routing: true,
             ...(context?.metadata || {})
           },
-          ...(context?.user_id && { user: { id: context.user_id } })
+          // Use authenticated user if available, otherwise fall back to context user_id
+          user: user || (context?.user_id ? { id: context.user_id } : undefined)
         };
 
         const response = await this.router.route(query, librarian_id, constellationContext);
@@ -211,7 +215,7 @@ export class ConstellationMCPServer {
       exposedHeaders: ['Mcp-Session-Id']
     }));
 
-    // Health check endpoint
+    // Health check endpoint (before auth middleware)
     app.get('/health', (_req, res) => {
       res.json({ 
         status: 'ok', 
@@ -219,15 +223,28 @@ export class ConstellationMCPServer {
         version: this.options.version,
         librarians: this.router.getAllLibrarians().length,
         protocol: 'MCP (Model Context Protocol)',
-        transport: 'HTTP'
+        transport: 'HTTP',
+        auth: getAuthConfig().enabled ? 'enabled' : 'disabled'
       });
     });
 
+    // Apply JWT authentication middleware
+    const authConfig = getAuthConfig();
+    if (authConfig.enabled) {
+      logger.info('JWT authentication enabled');
+      app.use(createJWTMiddleware(authConfig));
+    } else {
+      logger.warn('JWT authentication disabled - not for production use!');
+    }
+
     // MCP POST endpoint (stateless mode)
-    app.post('/mcp', async (req, res) => {
+    app.post('/mcp', async (req: Request, res: ExpressResponse) => {
       // Create new server instance for each request to avoid collisions
       try {
-        const server = this.createServerInstance();
+        // Extract authenticated user from request
+        const user = getUserFromRequest(req);
+        
+        const server = this.createServerInstance(user);
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: undefined, // Stateless mode
         });
@@ -288,11 +305,14 @@ export class ConstellationMCPServer {
       const port = this.options.port ?? 3001;
       const url = `http://${host}:${port}`;
       
+      const authEnabled = getAuthConfig().enabled;
+      
       console.log(`\n🌟 Constellation MCP Server`);
       console.log(`═══════════════════════════`);
       console.log(`🌐 Server URL: ${url}`);
       console.log(`📡 Health Check: ${url}/health`);
       console.log(`🔌 MCP Endpoint: ${url}/mcp`);
+      console.log(`🔐 Authentication: ${authEnabled ? 'ENABLED (JWT)' : 'DISABLED'}`);
       console.log(`📚 Available Tools: query, query_librarian`);
       console.log(`📖 Resources: constellation://librarian-hierarchy`);
       console.log(`🔧 Librarians Registered: ${this.router.getAllLibrarians().length}`);
