@@ -47,6 +47,7 @@ What they get:
 - **AI-Powered Routing**: Automatically routes queries to the right librarian
 - **Multiple AI Providers**: OpenAI, Anthropic, Google Vertex AI, and OpenAI-compatible servers
 - **JWT Authentication**: Secure access with team-based permissions
+- **Distributed Tracing**: Automatic observability with zero configuration
 - **MCP Protocol**: Industry-standard Model Context Protocol support
 - **Type Safety**: Full TypeScript support with compile-time guarantees
 - **Extensible**: Easy to add new librarians and capabilities
@@ -97,6 +98,7 @@ What they get:
 4. **examples/simple-librarian/** - Basic working example
 5. **registry/example-registry.yaml** - How teams register
 6. **JWT_AUTHENTICATION.md** - Security and authentication guide
+7. **OBSERVABILITY_GUIDE.md** - Distributed tracing and debugging
 
 ## Success Criteria
 
