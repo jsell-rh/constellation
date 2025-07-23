@@ -4,6 +4,7 @@
  */
 
 import type { AIClient as ConstellationAIClient } from '../ai/interface';
+import type { CircuitBreakerConfig } from '../resilience/circuit-breaker';
 
 /**
  * The fundamental librarian function type.
@@ -92,6 +93,9 @@ export interface LibrarianInfo {
   
   /** Parent librarian ID for hierarchies */
   parent?: string;
+  
+  /** Circuit breaker configuration for this librarian */
+  circuitBreaker?: Partial<CircuitBreakerConfig>;
 }
 
 /**
