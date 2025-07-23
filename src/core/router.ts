@@ -19,6 +19,7 @@ export class SimpleRouter {
   private readonly librarians = new Map<string, Librarian>();
   private readonly metadata = new Map<string, LibrarianInfo>();
   private readonly executor: LibrarianExecutor;
+  private defaultContext: Partial<Context> = {};
 
   constructor(options: RouterOptions = {}) {
     this.executor = options.executor ?? new LibrarianExecutor();
@@ -60,9 +61,10 @@ export class SimpleRouter {
       });
     }
 
-    // Get metadata and enrich context
+    // Get metadata and enrich context with defaults
     const librarianInfo = this.metadata.get(librarianId);
     const enrichedContext: Context = {
+      ...this.defaultContext,
       ...context,
       ...(librarianInfo && { librarian: librarianInfo }),
     };
@@ -109,6 +111,13 @@ export class SimpleRouter {
     }
     
     return matches;
+  }
+
+  /**
+   * Set default context that will be merged with all requests
+   */
+  setDefaultContext(context: Partial<Context>): void {
+    this.defaultContext = { ...this.defaultContext, ...context };
   }
 
   /**

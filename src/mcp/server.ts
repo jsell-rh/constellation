@@ -104,7 +104,8 @@ export class ConstellationMCPServer {
             ...(context?.metadata || {})
           },
           // Use authenticated user if available, otherwise fall back to context user_id
-          user: user || (context?.user_id ? { id: context.user_id } : undefined)
+          ...(user && { user }),
+          ...(context?.user_id && !user && { user: { id: context.user_id } })
         };
 
         const response = await this.delegationEngine.route(query, constellationContext);
@@ -138,7 +139,8 @@ export class ConstellationMCPServer {
             ...(context?.metadata || {})
           },
           // Use authenticated user if available, otherwise fall back to context user_id
-          user: user || (context?.user_id ? { id: context.user_id } : undefined)
+          ...(user && { user }),
+          ...(context?.user_id && !user && { user: { id: context.user_id } })
         };
 
         const response = await this.router.route(query, librarian_id, constellationContext);

@@ -139,7 +139,7 @@ export function generateToken(
     roles: user.roles,
   };
 
-  return jwt.sign(payload, secret, { expiresIn });
+  return jwt.sign(payload, secret, { expiresIn: expiresIn } as jwt.SignOptions);
 }
 
 /**

@@ -9,7 +9,7 @@ import { LibrarianExecutor } from './core/executor';
 import { runMCPServer } from './mcp/server';
 import { createLibrarian } from './types/librarian-factory';
 import { createAIClientFromEnv } from './ai/client';
-import { aiAssistantLibrarian, kubernetesExpertLibrarian, codeReviewLibrarian } from './examples/ai-assistant-librarian';
+import { loadLibrarians } from './registry/secure-loader';
 import pino from 'pino';
 
 const logger = pino({
@@ -49,57 +49,40 @@ async function main(): Promise<void> {
   // Create router with AI-enabled executor
   const router = new SimpleRouter({ executor });
 
-  // Register built-in librarians
-  // TODO: Load from registry in Phase 3
+  // Load librarians from secure registry
+  const registryPath = process.env.REGISTRY_PATH || './registry/constellation-registry.yaml';
   
-  // Example: Hello World librarian
-  const helloLibrarian = createLibrarian((query) => {
-    if (query.toLowerCase().includes('hello')) {
-      return Promise.resolve({
-        answer: 'Hello! I am Constellation, a distributed AI knowledge orchestration system. How can I help you?',
-        confidence: 1.0,
-      });
+  try {
+    logger.info({ path: registryPath }, 'Loading librarians from registry');
+    await loadLibrarians(registryPath, router);
+    
+    // Add AI client to router context for librarians that need it
+    if (aiClient) {
+      router.setDefaultContext({ ai: aiClient });
     }
-    return Promise.resolve({
-      answer: 'I can help you access knowledge from various expert librarians. Try asking about specific topics!',
-      confidence: 0.7,
+  } catch (error) {
+    logger.error({ error, path: registryPath }, 'Failed to load registry');
+    
+    // Fallback: Register a minimal hello librarian
+    logger.warn('Registering fallback hello librarian');
+    const helloLibrarian = createLibrarian((_query) => {
+      return Promise.resolve({
+        answer: 'Registry loading failed. This is a fallback librarian. Please check your registry configuration.',
+        error: {
+          code: 'REGISTRY_LOAD_FAILED',
+          message: 'Could not load librarians from registry',
+          recoverable: true,
+        },
+      });
     });
-  });
-
-  router.register({
-    id: 'hello',
-    name: 'Hello World',
-    description: 'A friendly greeting librarian',
-    capabilities: ['greeting', 'introduction'],
-  }, helloLibrarian);
-
-  // Register AI-powered librarians if AI is available
-  if (aiClient) {
+    
     router.register({
-      id: 'ai-assistant',
-      name: 'AI Assistant',
-      description: 'General purpose AI assistant that can answer a wide variety of questions',
-      capabilities: ['general-knowledge', 'question-answering', 'conversation'],
-    }, aiAssistantLibrarian);
-
-    router.register({
-      id: 'kubernetes-expert',
-      name: 'Kubernetes Expert',
-      description: 'Specialized AI assistant with deep Kubernetes and cloud-native expertise',
-      capabilities: ['kubernetes', 'k8s', 'containers', 'orchestration', 'devops', 'helm'],
-    }, kubernetesExpertLibrarian);
-
-    router.register({
-      id: 'code-reviewer',
-      name: 'Code Reviewer',
-      description: 'AI-powered code review assistant for identifying bugs, security issues, and improvements',
-      capabilities: ['code-review', 'debugging', 'security', 'performance', 'refactoring'],
-    }, codeReviewLibrarian);
-
-    logger.info('Registered AI-powered librarians');
+      id: 'hello-fallback',
+      name: 'Fallback Hello',
+      description: 'Emergency fallback librarian',
+      capabilities: ['greeting'],
+    }, helloLibrarian);
   }
-
-  // TODO: Register more librarians from registry
 
   const librarianCount = router.getAllLibrarians().length;
   logger.info(`Registered ${librarianCount} librarians`);

@@ -205,8 +205,11 @@ async function loadLibrarianFunction(functionPath: string): Promise<Librarian> {
     // Resolve relative to project root
     const absolutePath = path.resolve(process.cwd(), functionPath);
     
+    // For TypeScript files in development, use the src path
+    const importPath = absolutePath.replace(/\.ts$/, '');
+    
     // Import the module
-    const module = await import(absolutePath);
+    const module = await import(importPath);
     
     // Get the default export
     const librarianFn = module.default;

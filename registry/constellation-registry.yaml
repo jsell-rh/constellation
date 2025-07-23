@@ -1,0 +1,79 @@
+# Constellation Service Registry
+# This file configures all available librarians with their security settings
+
+version: "1.0"
+
+librarians:
+  # Public librarians - no authentication required
+  - id: hello
+    name: Hello World
+    function: ./src/librarians/hello-librarian.ts
+    team: platform
+    description: A friendly greeting librarian
+    permissions:
+      public: true  # Anyone can access
+
+  - id: docs
+    name: Documentation Helper
+    function: ./src/librarians/docs-librarian.ts
+    team: platform
+    description: Answers questions about Constellation documentation
+    permissions:
+      public: true  # Public documentation
+
+  # AI-powered librarians - team access required
+  - id: ai-assistant
+    name: AI Assistant
+    function: ./src/librarians/ai-assistant-librarian.ts
+    team: platform
+    description: General purpose AI assistant
+    permissions:
+      allowedTeams: [platform, engineering, product]
+    performance:
+      timeout: 30000  # 30 second timeout for AI responses
+
+  - id: kubernetes-expert
+    name: Kubernetes Expert
+    function: ./src/librarians/kubernetes-expert-librarian.ts
+    team: sre
+    description: Specialized Kubernetes and cloud-native assistant
+    permissions:
+      allowedTeams: [sre, platform, devops]
+      allowedRoles: [developer, sre-engineer]
+    performance:
+      cache: 300  # Cache responses for 5 minutes
+
+  - id: code-reviewer
+    name: Code Reviewer
+    function: ./src/librarians/code-review-librarian.ts
+    team: engineering
+    description: AI-powered code review and security analysis
+    permissions:
+      allowedTeams: [engineering, security, qa]
+      allowedRoles: [developer, tech-lead, security-engineer]
+    performance:
+      timeout: 60000  # 1 minute for thorough analysis
+
+  # Example team-specific librarians
+  - id: deployment-helper
+    name: Deployment Assistant
+    function: ./src/librarians/deployment-librarian.ts
+    team: platform
+    description: Helps with deployment configurations and troubleshooting
+    permissions:
+      allowedTeams: [platform, sre, devops]
+    performance:
+      cache: false  # Always fresh deployment info
+
+  # Example sensitive data librarian
+  - id: metrics-analyzer
+    name: Metrics Analyzer
+    function: ./src/librarians/metrics-librarian.ts
+    team: analytics
+    description: Analyzes system metrics and performance data
+    permissions:
+      allowedTeams: [analytics, sre, management]
+      sensitiveData: true  # Extra audit logging
+    performance:
+      cache: 60  # Cache for 1 minute
+      rateLimit: 20  # Max 20 requests per minute
