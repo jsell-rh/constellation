@@ -38,6 +38,11 @@ librarians:
         windowSize: 30000      # 30 second window
         timeout: 60000         # Try again after 1 minute
         successThreshold: 3    # Need 3 successes to close
+    cache:
+      enabled: true
+      ttl: 1800             # Cache for 30 minutes
+      strategy: user-aware  # Each user gets their own cache
+      tags: [ai, general]   # For bulk invalidation
 
   - id: kubernetes-expert
     name: Kubernetes Expert
@@ -49,6 +54,11 @@ librarians:
       allowedRoles: [developer, sre-engineer]
     performance:
       cache: 300  # Cache responses for 5 minutes
+    cache:
+      enabled: true
+      ttl: 600              # Cache for 10 minutes
+      strategy: team-aware  # Share cache across team members
+      tags: [kubernetes, sre]
 
   - id: code-reviewer
     name: Code Reviewer

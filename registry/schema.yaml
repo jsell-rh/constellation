@@ -28,13 +28,13 @@ properties:
       description:
         type: string
         description: "Registry description"
-  
+
   librarians:
     type: array
     minItems: 1
     items:
       $ref: '#/definitions/librarian'
-  
+
   config:
     $ref: '#/definitions/config'
 
@@ -53,33 +53,33 @@ definitions:
         type: string
         pattern: '^[a-z0-9-]+$'
         description: "Unique identifier (lowercase, alphanumeric, hyphens)"
-        
+
       name:
         type: string
         description: "Human-readable name"
-        
+
       description:
         type: string
         description: "What this librarian does"
-        
+
       endpoint:
         type: string
         format: uri
         description: "HTTP(S) endpoint URL"
-        
+
       type:
         type: string
         enum: [router, specialist, expert, emergency, location]
         description: "Librarian type"
-        
+
       team:
         type: string
         description: "Owning team"
-        
+
       parent:
         type: string
         description: "Parent librarian ID for hierarchy"
-        
+
       capabilities:
         type: array
         minItems: 1
@@ -87,29 +87,32 @@ definitions:
           type: string
           pattern: '^[a-z0-9.-]+$'
         description: "Hierarchical capabilities (e.g., 'kubernetes.operations.deployment')"
-        
+
       data_sources:
         type: array
         items:
           $ref: '#/definitions/dataSource'
-          
+
       delegates_to:
         type: array
         items:
           type: string
         description: "IDs of librarians this can delegate to"
-        
+
       resilience:
         $ref: '#/definitions/resilience'
-        
+
+      cache:
+        $ref: '#/definitions/cache'
+
       sla:
         $ref: '#/definitions/sla'
-        
+
       context:
         type: object
         additionalProperties: true
         description: "Additional context (e.g., location, timezone)"
-        
+
       activation:
         $ref: '#/definitions/activation'
 
@@ -286,3 +289,53 @@ definitions:
           endpoint:
             type: string
             default: "/health"
+
+  cache:
+    type: object
+    properties:
+      enabled:
+        type: boolean
+        default: false
+        description: "Whether caching is enabled for this librarian"
+      ttl:
+        type: integer
+        minimum: 1
+        maximum: 86400
+        default: 3600
+        description: "Time to live in seconds"
+      strategy:
+        type: string
+        enum: [user-aware, global, team-aware]
+        default: user-aware
+        description: "Cache key generation strategy"
+      tags:
+        type: array
+        items:
+          type: string
+        description: "Tags for cache invalidation"
+      cacheErrors:
+        type: boolean
+        default: false
+        description: "Whether to cache error responses"
+      maxEntriesPerUser:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 100
+        description: "Maximum cached responses per user"
+      warmup:
+        type: object
+        properties:
+          enabled:
+            type: boolean
+            default: false
+            description: "Enable cache warming"
+          queries:
+            type: array
+            items:
+              type: string
+            description: "Queries to warm up the cache with"
+          schedule:
+            type: string
+            pattern: '^(@(annually|yearly|monthly|weekly|daily|hourly|reboot))|(@every (\d+(ns|us|µs|ms|s|m|h))+)|((((\d+,)+\d+|(\d+(\/|-)\d+)|\d+|\*) ?){5,7})$'
+            description: "Cron expression for cache warming schedule"

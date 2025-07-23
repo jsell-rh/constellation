@@ -12,6 +12,8 @@ import type { LibrarianImplementation } from '../types/librarian-factory';
 import type { Librarian, LibrarianInfo, Context, Response } from '../types/core';
 import type { SimpleRouter } from '../core/router';
 import type { CircuitBreakerConfig } from '../resilience/circuit-breaker';
+import type { LibrarianCacheConfig } from '../cache/interface';
+import { getCacheManager } from '../cache/cache-manager';
 import pino from 'pino';
 
 const logger = pino({
@@ -52,6 +54,9 @@ export interface SecureLibrarianEntry {
     };
     timeout_ms?: number;
   };
+
+  // Cache configuration
+  cache?: LibrarianCacheConfig;
 }
 
 export interface RegistryConfig {
@@ -180,6 +185,10 @@ function createSecureLibrarian(librarianFn: Librarian, entry: SecureLibrarianEnt
       librarianInfo.circuitBreaker = entry.resilience.circuit_breaker;
     }
 
+    if (entry.cache) {
+      librarianInfo.cache = entry.cache;
+    }
+
     const enrichedContext: Context = {
       ...context,
       librarian: librarianInfo,
@@ -270,6 +279,15 @@ export async function loadLibrarians(registryPath: string, router: SimpleRouter)
         capabilities: [],
         team: entry.team,
       };
+
+      // Add cache configuration if present
+      if (entry.cache) {
+        metadata.cache = entry.cache;
+
+        // Configure cache manager for this librarian
+        const cacheManager = getCacheManager();
+        cacheManager.configureLibrarian(entry.id, entry.cache);
+      }
 
       // Register with router
       router.register(metadata, secureLibrarian);
