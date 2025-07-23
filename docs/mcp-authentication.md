@@ -2,6 +2,28 @@
 
 This guide explains how to use Constellation's MCP (Model Context Protocol) server with authentication.
 
+## Important: Request Format
+
+When making HTTP requests to the MCP server, you MUST include proper headers:
+
+```http
+POST /mcp HTTP/1.1
+Accept: application/json, text/event-stream
+Content-Type: application/json
+
+{
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "params": {
+    "name": "query",
+    "arguments": { ... }
+  },
+  "id": 1
+}
+```
+
+**Note**: The MCP server uses Server-Sent Events (SSE) format for responses. The `Accept` header must include `text/event-stream` or you'll receive a "Not Acceptable" error.
+
 ## Understanding Authentication
 
 Constellation librarians can have different access levels:
@@ -194,3 +216,88 @@ For development/testing, you can:
      }
    }
    ```
+
+## Working Examples
+
+### Using curl
+```bash
+# Query with user context
+curl -X POST http://localhost:3001/mcp \
+  -H "Accept: application/json, text/event-stream" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "method": "tools/call",
+    "params": {
+      "name": "query",
+      "arguments": {
+        "query": "How do I deploy to Kubernetes?",
+        "context": {
+          "user": {
+            "id": "test-user",
+            "teams": ["platform", "engineering", "sre"],
+            "roles": ["developer"]
+          }
+        }
+      }
+    },
+    "id": 1
+  }'
+```
+
+### Using axios (JavaScript/TypeScript)
+```javascript
+import axios from 'axios';
+
+// IMPORTANT: Must include Accept header with text/event-stream
+const response = await axios.post(
+  'http://localhost:3001/mcp',
+  {
+    jsonrpc: '2.0',
+    method: 'tools/call',
+    params: {
+      name: 'query',
+      arguments: {
+        query: 'How do I deploy to Kubernetes?',
+        context: {
+          user: {
+            id: 'test-user',
+            teams: ['platform', 'engineering', 'sre'],
+            roles: ['developer']
+          }
+        }
+      }
+    },
+    id: 1
+  },
+  {
+    headers: {
+      'Accept': 'application/json, text/event-stream',  // Required!
+      'Content-Type': 'application/json'
+    }
+  }
+);
+
+// Parse SSE response
+const responseText = response.data;
+const lines = responseText.split('\n');
+for (const line of lines) {
+  if (line.startsWith('data: ')) {
+    const data = JSON.parse(line.substring(6));
+    console.log(data.result?.content?.[0]?.text);
+  }
+}
+```
+
+### Common Issues
+
+**"Not Acceptable" Error**
+```json
+{
+  "error": {
+    "code": -32000,
+    "message": "Not Acceptable: Client must accept both application/json and text/event-stream"
+  }
+}
+```
+**Solution**: Include `Accept: application/json, text/event-stream` header in your request.
