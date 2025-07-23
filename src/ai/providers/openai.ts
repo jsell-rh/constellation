@@ -4,12 +4,12 @@
 
 import { ChatOpenAI } from '@langchain/openai';
 import { AIMessage, HumanMessage, SystemMessage } from '@langchain/core/messages';
-import type { 
-  AIProvider, 
-  AIMessage as ConstellationMessage, 
-  AIResponse, 
-  AIStreamResponse, 
-  AICompletionOptions 
+import type {
+  AIProvider,
+  AIMessage as ConstellationMessage,
+  AIResponse,
+  AIStreamResponse,
+  AICompletionOptions,
 } from '../interface';
 
 export interface OpenAIProviderConfig {
@@ -38,13 +38,16 @@ export class OpenAIProvider implements AIProvider {
       ...(this.config.model && { modelName: this.config.model }),
       ...(this.config.temperature !== undefined && { temperature: this.config.temperature }),
       ...(this.config.maxTokens !== undefined && { maxTokens: this.config.maxTokens }),
-      ...(config.baseURL && { openAIApiBase: config.baseURL }),
+      ...(config.baseURL && { configuration: { baseURL: config.baseURL } }),
     });
   }
 
-  async complete(messages: ConstellationMessage[], options: AICompletionOptions = {}): Promise<AIResponse> {
+  async complete(
+    messages: ConstellationMessage[],
+    options: AICompletionOptions = {},
+  ): Promise<AIResponse> {
     const langchainMessages = this.convertMessages(messages, options.system);
-    
+
     // Apply options to the LLM instance
     const llm = this.llm.bind({
       ...(options.max_tokens && { maxTokens: options.max_tokens }),
@@ -57,10 +60,9 @@ export class OpenAIProvider implements AIProvider {
         ...(options.timeout && { timeout: options.timeout }),
       });
 
-      const content = typeof response.content === 'string' 
-        ? response.content 
-        : JSON.stringify(response.content);
-      
+      const content =
+        typeof response.content === 'string' ? response.content : JSON.stringify(response.content);
+
       return {
         content,
         ...(response.usage_metadata && {
@@ -68,21 +70,26 @@ export class OpenAIProvider implements AIProvider {
             prompt_tokens: response.usage_metadata.input_tokens,
             completion_tokens: response.usage_metadata.output_tokens,
             total_tokens: response.usage_metadata.total_tokens,
-          }
+          },
         }),
         ...(this.config.model && { model: this.config.model }),
-        ...(response.response_metadata?.finish_reason && { 
-          finish_reason: response.response_metadata.finish_reason as string 
+        ...(response.response_metadata?.finish_reason && {
+          finish_reason: response.response_metadata.finish_reason as string,
         }),
       };
     } catch (error) {
-      throw new Error(`OpenAI completion failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(
+        `OpenAI completion failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
-  async stream(messages: ConstellationMessage[], options: AICompletionOptions = {}): Promise<AIStreamResponse> {
+  async stream(
+    messages: ConstellationMessage[],
+    options: AICompletionOptions = {},
+  ): Promise<AIStreamResponse> {
     const langchainMessages = this.convertMessages(messages, options.system);
-    
+
     // Apply options to the LLM instance
     const llm = this.llm.bind({
       ...(options.max_tokens && { maxTokens: options.max_tokens }),
@@ -100,12 +107,11 @@ export class OpenAIProvider implements AIProvider {
     async function* streamGenerator(): AsyncGenerator<string, void, unknown> {
       for await (const chunk of stream) {
         if (chunk.content) {
-          const content = typeof chunk.content === 'string' 
-            ? chunk.content 
-            : JSON.stringify(chunk.content);
+          const content =
+            typeof chunk.content === 'string' ? chunk.content : JSON.stringify(chunk.content);
           yield content;
         }
-        
+
         // Capture usage and model from the last chunk
         if (chunk.usage_metadata) {
           usage = {
@@ -121,13 +127,13 @@ export class OpenAIProvider implements AIProvider {
     }
 
     const result = streamGenerator();
-    
+
     // Add usage and model properties to the async iterable
     Object.defineProperty(result, 'usage', {
       get: () => usage,
       enumerable: true,
     });
-    
+
     Object.defineProperty(result, 'model', {
       get: () => model || this.config.model,
       enumerable: true,
@@ -137,12 +143,18 @@ export class OpenAIProvider implements AIProvider {
   }
 
   async ask(prompt: string, options: AICompletionOptions = {}): Promise<string> {
-    const messages: ConstellationMessage[] = [
-      { role: 'user', content: prompt }
-    ];
-    
+    const messages: ConstellationMessage[] = [{ role: 'user', content: prompt }];
+
     const response = await this.complete(messages, options);
-    return response.content;
+
+    // Clean up Ollama/qwen3 thinking tags if present
+    let content = response.content;
+    const thinkMatch = content.match(/<think>[\s\S]*?<\/think>\s*([\s\S]*)/);
+    if (thinkMatch?.[1]) {
+      content = thinkMatch[1].trim();
+    }
+
+    return content;
   }
 
   isAvailable(): boolean {
@@ -150,17 +162,13 @@ export class OpenAIProvider implements AIProvider {
   }
 
   getSupportedModels(): string[] {
-    return [
-      'gpt-4',
-      'gpt-4-turbo',
-      'gpt-4o',
-      'gpt-4o-mini', 
-      'gpt-3.5-turbo',
-      'gpt-3.5-turbo-16k',
-    ];
+    return ['gpt-4', 'gpt-4-turbo', 'gpt-4o', 'gpt-4o-mini', 'gpt-3.5-turbo', 'gpt-3.5-turbo-16k'];
   }
 
-  private convertMessages(messages: ConstellationMessage[], systemPrompt?: string): Array<SystemMessage | HumanMessage | AIMessage> {
+  private convertMessages(
+    messages: ConstellationMessage[],
+    systemPrompt?: string,
+  ): Array<SystemMessage | HumanMessage | AIMessage> {
     const result: Array<SystemMessage | HumanMessage | AIMessage> = [];
 
     // Add system prompt if provided

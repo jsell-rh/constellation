@@ -1,0 +1,59 @@
+# Test Registry - All Public Access (No Authentication)
+# Use this for testing without authentication
+# Set REGISTRY_PATH=./registry/test-no-auth.yaml
+
+version: "1.0"
+
+librarians:
+  # All librarians are public for testing
+  - id: hello
+    name: Hello World
+    function: ./src/librarians/hello-librarian.ts
+    team: platform
+    description: A friendly greeting librarian
+    permissions:
+      public: true
+
+  - id: docs
+    name: Documentation Helper
+    function: ./src/librarians/docs-librarian.ts
+    team: platform
+    description: Answers questions about Constellation documentation
+    permissions:
+      public: true
+
+  - id: ai-assistant
+    name: AI Assistant
+    function: ./src/librarians/ai-assistant-librarian.ts
+    team: platform
+    description: General purpose AI assistant
+    permissions:
+      public: true
+    performance:
+      timeout: 30000
+    cache:
+      enabled: true
+      ttl: 1800
+      strategy: global  # No user awareness for public access
+
+  - id: kubernetes-expert
+    name: Kubernetes Expert
+    function: ./src/librarians/kubernetes-expert-librarian.ts
+    team: sre
+    description: Specialized Kubernetes and cloud-native assistant
+    permissions:
+      public: true
+    cache:
+      enabled: true
+      ttl: 600
+      strategy: global
+
+  - id: code-reviewer
+    name: Code Reviewer
+    function: ./src/librarians/code-review-librarian.ts
+    team: engineering
+    description: AI-powered code review and security analysis
+    permissions:
+      public: true
+    performance:
+      timeout: 60000

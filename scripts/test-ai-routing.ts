@@ -15,7 +15,6 @@ import pino from 'pino';
 
 const logger = pino({
   level: 'info',
-  transport: { target: 'pino-pretty' },
 });
 
 // Create AI client configured for local Ollama
@@ -130,8 +129,8 @@ for (const { info, fn } of librarians) {
 // Set default context with AI
 router.setDefaultContext({ ai: aiClient });
 
-// Create delegation engine
-const delegationEngine = new DelegationEngine(router);
+// Create delegation engine with AI client
+const delegationEngine = new DelegationEngine(router, { aiClient });
 
 // Test queries
 async function testQueries() {

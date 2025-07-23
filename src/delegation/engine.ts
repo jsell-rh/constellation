@@ -5,6 +5,7 @@
 
 import type { SimpleRouter } from '../core/router';
 import type { Context, Response } from '../types/core';
+import type { AIClient } from '../ai/interface';
 import { errorResponse } from '../types/librarian-factory';
 import { AIQueryAnalyzer } from './ai-analyzer';
 import { getAIClient } from '../ai/client';
@@ -20,6 +21,10 @@ export interface DelegationDecision {
   reasoning?: string;
 }
 
+export interface DelegationEngineOptions {
+  aiClient?: AIClient;
+}
+
 /**
  * Engine for intelligent query delegation
  * Currently implements simple keyword matching, will be enhanced with AI
@@ -27,9 +32,13 @@ export interface DelegationDecision {
 export class DelegationEngine {
   private aiAnalyzer?: AIQueryAnalyzer;
 
-  constructor(private router: SimpleRouter) {
+  constructor(
+    private router: SimpleRouter,
+    options: DelegationEngineOptions = {},
+  ) {
+    // Try to use provided AI client first, then fall back to global client
     try {
-      const aiClient = getAIClient();
+      const aiClient = options.aiClient || getAIClient();
       if (aiClient.defaultProvider.isAvailable()) {
         this.aiAnalyzer = new AIQueryAnalyzer(aiClient);
         logger.info('Delegation engine initialized with AI support');
