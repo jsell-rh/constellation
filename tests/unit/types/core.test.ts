@@ -6,7 +6,7 @@ import type {
   ErrorInfo,
   Source,
 } from '../../../src/types/core';
-import type { AIClient } from '../../../src/ai/interface';
+import type { AIClient, AIStreamResponse } from '../../../src/ai/interface';
 
 /* eslint-disable @typescript-eslint/require-await */
 
@@ -105,13 +105,31 @@ describe('Core Types', () => {
         },
         delegationChain: ['parent-lib', 'grandparent-lib'],
         ai: {
-          defaultProvider: { name: 'mock', getSupportedModels: () => [], isAvailable: () => true, complete: async () => ({ content: '' }), stream: async () => ({ [Symbol.asyncIterator]: async function*() {} } as any), ask: async () => '' },
+          defaultProvider: { 
+            name: 'mock', 
+            getSupportedModels: () => [], 
+            isAvailable: () => true, 
+            complete: async () => ({ content: '' }), 
+            stream: async () => {
+              const result = (async function*() {})() as AsyncGenerator<string> & AIStreamResponse;
+              return result;
+            }, 
+            ask: async () => '' 
+          },
           providers: {},
           complete: async () => ({ content: 'AI response' }),
-          stream: async () => ({ [Symbol.asyncIterator]: async function*() { yield 'response'; } } as any),
+          stream: async () => {
+            const gen = async function*(): AsyncGenerator<string> { yield 'response'; };
+            const result = gen() as AsyncGenerator<string> & AIStreamResponse;
+            return result;
+          },
           ask: async () => 'AI response',
           completeWith: async () => ({ content: 'AI response' }),
-          streamWith: async () => ({ [Symbol.asyncIterator]: async function*() { yield 'response'; } } as any),
+          streamWith: async () => {
+            const gen = async function*(): AsyncGenerator<string> { yield 'response'; };
+            const result = gen() as AsyncGenerator<string> & AIStreamResponse;
+            return result;
+          },
           askWith: async () => 'AI response',
         } as AIClient,
         availableDelegates: [
@@ -193,15 +211,24 @@ describe('Core Types', () => {
           getSupportedModels: () => [],
           isAvailable: () => true,
           complete: async () => ({ content: 'completion' }),
-          stream: async () => ({ [Symbol.asyncIterator]: async function*() {} } as any),
+          stream: async () => {
+            const result = (async function*() {})() as AsyncGenerator<string> & AIStreamResponse;
+            return result;
+          },
           ask: async () => 'completion',
         },
         providers: {},
         complete: async () => ({ content: 'completion' }),
-        stream: async () => ({ [Symbol.asyncIterator]: async function*() {} } as any),
+        stream: async () => {
+          const result = (async function*() {})() as AsyncGenerator<string> & AIStreamResponse;
+          return result;
+        },
         ask: async () => 'completion',
         completeWith: async () => ({ content: 'completion' }),
-        streamWith: async () => ({ [Symbol.asyncIterator]: async function*() {} } as any),
+        streamWith: async () => {
+          const result = (async function*() {})() as AsyncGenerator<string> & AIStreamResponse;
+          return result;
+        },
         askWith: async () => 'completion',
       };
 
