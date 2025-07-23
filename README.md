@@ -41,6 +41,16 @@ What they get:
 - **<2 second** response time
 - **99.9%** availability
 
+## Key Features
+
+- **Simple Developer Experience**: Write async functions, framework handles the rest
+- **AI-Powered Routing**: Automatically routes queries to the right librarian
+- **Multiple AI Providers**: OpenAI, Anthropic, Google Vertex AI, and OpenAI-compatible servers
+- **JWT Authentication**: Secure access with team-based permissions
+- **MCP Protocol**: Industry-standard Model Context Protocol support
+- **Type Safety**: Full TypeScript support with compile-time guarantees
+- **Extensible**: Easy to add new librarians and capabilities
+
 ## Implementation Guide for Autonomous Agents
 
 ### Phase 1: Core Foundation (Start Here)
@@ -86,6 +96,7 @@ What they get:
 3. **interfaces/librarian.ts** - Core type definitions
 4. **examples/simple-librarian/** - Basic working example
 5. **registry/example-registry.yaml** - How teams register
+6. **JWT_AUTHENTICATION.md** - Security and authentication guide
 
 ## Success Criteria
 
