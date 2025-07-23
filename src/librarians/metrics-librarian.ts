@@ -4,9 +4,9 @@
  * NOTE: This librarian handles sensitive data and has extra audit logging
  */
 
-import type { Context } from '../types/core';
+import type { Context, Response } from '../types/core';
 
-export default async function metricsLibrarian(query: string, context?: Context) {
+export default async function metricsLibrarian(query: string, context?: Context): Promise<Response> {
   // This librarian is marked as handling sensitive data
   // The framework will automatically add extra audit logging
   

@@ -3,7 +3,7 @@
  * Answers questions about Constellation documentation
  */
 
-import type { Context } from '../types/core';
+import type { Context, Response } from '../types/core';
 
 // In a real implementation, this would search actual documentation
 const DOCS_KNOWLEDGE = {
@@ -15,7 +15,7 @@ const DOCS_KNOWLEDGE = {
   'ai providers': 'Constellation supports OpenAI, Anthropic, Google Vertex AI, and any OpenAI-compatible server (Ollama, TGI, vLLM). Configure with environment variables.',
 };
 
-export default async function docsLibrarian(query: string, _context?: Context) {
+export default function docsLibrarian(query: string, _context?: Context): Response {
   const lowerQuery = query.toLowerCase();
   
   // Search for relevant documentation

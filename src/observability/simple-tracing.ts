@@ -52,9 +52,11 @@ class SimpleTracer implements api.Tracer {
     context: api.Context,
     fn: F
   ): ReturnType<F>;
-  startActiveSpan<F extends (span: api.Span) => unknown>(...args: any[]): ReturnType<F> {
-    const span = this.startSpan(args[0], args[1] as api.SpanOptions);
-    const fn = args[args.length - 1] as F;
+  startActiveSpan<F extends (span: api.Span) => unknown>(...args: unknown[]): ReturnType<F> {
+    const [name, optionsOrFn, contextOrFn, maybeFn] = args;
+    const options = typeof optionsOrFn === 'object' && optionsOrFn !== null ? optionsOrFn as api.SpanOptions : {};
+    const fn = (maybeFn || contextOrFn || optionsOrFn) as F;
+    const span = this.startSpan(name as string, options);
     return fn(span) as ReturnType<F>;
   }
 }
@@ -134,9 +136,12 @@ class SimpleSpan implements api.Span {
   }
 
   recordException(exception: api.Exception, time?: number): void {
+    const errorName = exception instanceof Error ? exception.name : 'Error';
+    const errorMessage = exception instanceof Error ? exception.message : String(exception);
+    
     this.addEvent('exception', {
-      'exception.type': (exception as any).name || 'Error',
-      'exception.message': (exception as any).message || String(exception),
+      'exception.type': errorName,
+      'exception.message': errorMessage,
     }, time);
   }
 }

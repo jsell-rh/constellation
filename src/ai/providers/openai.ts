@@ -57,8 +57,12 @@ export class OpenAIProvider implements AIProvider {
         ...(options.timeout && { timeout: options.timeout }),
       });
 
+      const content = typeof response.content === 'string' 
+        ? response.content 
+        : JSON.stringify(response.content);
+      
       return {
-        content: response.content as string,
+        content,
         ...(response.usage_metadata && {
           usage: {
             prompt_tokens: response.usage_metadata.input_tokens,
@@ -67,7 +71,9 @@ export class OpenAIProvider implements AIProvider {
           }
         }),
         ...(this.config.model && { model: this.config.model }),
-        ...(response.response_metadata?.finish_reason && { finish_reason: response.response_metadata.finish_reason }),
+        ...(response.response_metadata?.finish_reason && { 
+          finish_reason: response.response_metadata.finish_reason as string 
+        }),
       };
     } catch (error) {
       throw new Error(`OpenAI completion failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -94,7 +100,10 @@ export class OpenAIProvider implements AIProvider {
     async function* streamGenerator(): AsyncGenerator<string, void, unknown> {
       for await (const chunk of stream) {
         if (chunk.content) {
-          yield chunk.content as string;
+          const content = typeof chunk.content === 'string' 
+            ? chunk.content 
+            : JSON.stringify(chunk.content);
+          yield content;
         }
         
         // Capture usage and model from the last chunk
@@ -106,7 +115,7 @@ export class OpenAIProvider implements AIProvider {
           };
         }
         if (chunk.response_metadata?.model_name) {
-          model = chunk.response_metadata.model_name;
+          model = chunk.response_metadata.model_name as string;
         }
       }
     }

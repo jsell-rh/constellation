@@ -193,7 +193,7 @@ export class ConstellationAIClient implements AIClient {
  */
 export function createAIClientFromEnv(): ConstellationAIClient {
   const config: AIConfiguration = {
-    defaultProvider: (process.env.AI_DEFAULT_PROVIDER as any) ?? 'openai',
+    defaultProvider: (process.env.AI_DEFAULT_PROVIDER as 'openai' | 'anthropic' | 'vertex-ai') ?? 'openai',
   };
 
   // OpenAI configuration

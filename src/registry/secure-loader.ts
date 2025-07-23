@@ -8,6 +8,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
 import { createLibrarian } from '../types/librarian-factory';
+import type { LibrarianImplementation } from '../types/librarian-factory';
 import type { Librarian, LibrarianInfo, Context, Response } from '../types/core';
 import type { SimpleRouter } from '../core/router';
 import pino from 'pino';
@@ -39,6 +40,16 @@ export interface SecureLibrarianEntry {
     cache?: boolean | number;      // Enable caching (TTL in seconds)
     timeout?: number;              // Custom timeout in ms
     rateLimit?: number;            // Requests per minute
+  };
+  
+  // Resilience configuration
+  resilience?: {
+    circuit_breaker?: Partial<CircuitBreakerConfig>;
+    retry?: {
+      max_attempts?: number;
+      backoff?: string;
+    };
+    timeout_ms?: number;
   };
 }
 
@@ -159,6 +170,7 @@ function createSecureLibrarian(
         description: entry.description || '',
         capabilities: [],
         team: entry.team,
+        circuitBreaker: entry.resilience?.circuit_breaker,
       },
     };
     
@@ -209,7 +221,7 @@ async function loadLibrarianFunction(functionPath: string): Promise<Librarian> {
     const importPath = absolutePath.replace(/\.ts$/, '');
     
     // Import the module
-    const module = await import(importPath);
+    const module = await import(importPath) as { default: unknown };
     
     // Get the default export
     const librarianFn = module.default;
@@ -219,7 +231,7 @@ async function loadLibrarianFunction(functionPath: string): Promise<Librarian> {
     }
     
     // Wrap with error handling
-    return createLibrarian(librarianFn);
+    return createLibrarian(librarianFn as LibrarianImplementation);
   } catch (error) {
     throw new Error(
       `Failed to load librarian from ${functionPath}: ${

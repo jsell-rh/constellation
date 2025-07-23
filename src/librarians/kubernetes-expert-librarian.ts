@@ -3,9 +3,9 @@
  * Specialized AI assistant for Kubernetes and cloud-native questions
  */
 
-import type { Context } from '../types/core';
+import type { Context, Response } from '../types/core';
 
-export default async function kubernetesExpertLibrarian(query: string, context?: Context) {
+export default async function kubernetesExpertLibrarian(query: string, context?: Context): Promise<Response> {
   // Check if AI is available
   if (!context?.ai) {
     return {

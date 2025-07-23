@@ -3,9 +3,9 @@
  * Uses the configured AI provider to answer general questions
  */
 
-import type { Context } from '../types/core';
+import type { Context, Response } from '../types/core';
 
-export default async function aiAssistantLibrarian(query: string, context?: Context) {
+export default async function aiAssistantLibrarian(query: string, context?: Context): Promise<Response> {
   // Check if AI is available
   if (!context?.ai) {
     return {

@@ -9,7 +9,7 @@ import type { Librarian, Response, Context } from './core';
  * Type for the implementation function passed to createLibrarian
  * This enforces that implementations must return Promise<Response>
  */
-type LibrarianImplementation = (query: string, context?: Context) => Promise<Response>;
+export type LibrarianImplementation = (query: string, context?: Context) => Promise<Response>;
 
 /**
  * Creates a type-safe librarian function that guarantees:

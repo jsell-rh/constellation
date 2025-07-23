@@ -100,7 +100,10 @@ export class AnthropicProvider implements AIProvider {
     async function* streamGenerator(): AsyncGenerator<string, void, unknown> {
       for await (const chunk of stream) {
         if (chunk.content) {
-          yield chunk.content as string;
+          const content = typeof chunk.content === 'string' 
+            ? chunk.content 
+            : JSON.stringify(chunk.content);
+          yield content;
         }
         
         // Capture usage and model from the last chunk
@@ -112,7 +115,7 @@ export class AnthropicProvider implements AIProvider {
           };
         }
         if (chunk.response_metadata?.model) {
-          model = chunk.response_metadata.model;
+          model = chunk.response_metadata.model as string;
         }
       }
     }

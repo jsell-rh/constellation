@@ -3,9 +3,9 @@
  * AI-powered code review for security, bugs, and best practices
  */
 
-import type { Context } from '../types/core';
+import type { Context, Response } from '../types/core';
 
-export default async function codeReviewLibrarian(query: string, context?: Context) {
+export default async function codeReviewLibrarian(query: string, context?: Context): Promise<Response> {
   // Check if AI is available
   if (!context?.ai) {
     return {

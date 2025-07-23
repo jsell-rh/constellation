@@ -3,9 +3,9 @@
  * A simple greeting librarian that demonstrates the basic pattern
  */
 
-import type { Context } from '../types/core';
+import type { Context, Response } from '../types/core';
 
-export default async function helloLibrarian(query: string, _context?: Context) {
+export default function helloLibrarian(query: string, _context?: Context): Response {
   const lowerQuery = query.toLowerCase();
   
   if (lowerQuery.includes('hello') || lowerQuery.includes('hi')) {

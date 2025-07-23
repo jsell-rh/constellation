@@ -3,9 +3,9 @@
  * Helps with deployment configurations and troubleshooting
  */
 
-import type { Context } from '../types/core';
+import type { Context, Response } from '../types/core';
 
-export default async function deploymentLibrarian(query: string, context?: Context) {
+export default async function deploymentLibrarian(query: string, context?: Context): Promise<Response> {
   const lowerQuery = query.toLowerCase();
   
   // Check team access

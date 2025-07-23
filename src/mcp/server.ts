@@ -161,7 +161,7 @@ export class ConstellationMCPServer {
         description: 'The complete hierarchy of available librarians with their capabilities and relationships',
         mimeType: 'application/json'
       },
-      async () => {
+      () => {
         const librarians = this.router.getAllLibrarians();
         const hierarchy = {
           total: librarians.length,
@@ -240,43 +240,45 @@ export class ConstellationMCPServer {
     }
 
     // MCP POST endpoint (stateless mode)
-    app.post('/mcp', async (req: Request, res: ExpressResponse) => {
+    app.post('/mcp', (req: Request, res: ExpressResponse) => {
       // Create new server instance for each request to avoid collisions
-      try {
-        // Extract authenticated user from request
-        const user = getUserFromRequest(req);
-        
-        const server = this.createServerInstance(user);
-        const transport = new StreamableHTTPServerTransport({
-          sessionIdGenerator: undefined, // Stateless mode
-        });
-        
-        res.on('close', () => {
-          logger.debug('Request closed');
-          transport.close();
-          server.close();
-        });
-        
-        await server.connect(transport);
-        await transport.handleRequest(req, res, req.body);
-        
-      } catch (error) {
-        logger.error({ error }, 'Error handling MCP request');
-        if (!res.headersSent) {
-          res.status(500).json({
-            jsonrpc: '2.0',
-            error: {
-              code: -32603,
-              message: 'Internal server error',
-            },
-            id: null,
+      void (async () => {
+        try {
+          // Extract authenticated user from request
+          const user = getUserFromRequest(req);
+          
+          const server = this.createServerInstance(user);
+          const transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: undefined, // Stateless mode
           });
+          
+          res.on('close', () => {
+            logger.debug('Request closed');
+            void transport.close();
+            void server.close();
+          });
+          
+          await server.connect(transport);
+          await transport.handleRequest(req, res, req.body);
+          
+        } catch (error) {
+          logger.error({ error }, 'Error handling MCP request');
+          if (!res.headersSent) {
+            res.status(500).json({
+              jsonrpc: '2.0',
+              error: {
+                code: -32603,
+                message: 'Internal server error',
+              },
+              id: null,
+            });
+          }
         }
-      }
+      })();
     });
 
     // SSE notifications not supported in stateless mode
-    app.get('/mcp', async (_req, res) => {
+    app.get('/mcp', (_req, res) => {
       logger.debug('Received GET MCP request - not supported in stateless mode');
       res.writeHead(405).end(JSON.stringify({
         jsonrpc: "2.0",
@@ -289,7 +291,7 @@ export class ConstellationMCPServer {
     });
 
     // Session termination not needed in stateless mode
-    app.delete('/mcp', async (_req, res) => {
+    app.delete('/mcp', (_req, res) => {
       logger.debug('Received DELETE MCP request - not supported in stateless mode');
       res.writeHead(405).end(JSON.stringify({
         jsonrpc: "2.0",
@@ -346,7 +348,7 @@ export class ConstellationMCPServer {
   /**
    * Format a Constellation response for MCP tool result
    */
-  private formatMCPResponse(response: Response) {
+  private formatMCPResponse(response: Response): { content: Array<{ type: 'text'; text: string }> } {
     const content = [];
 
     if (response.answer !== undefined) {

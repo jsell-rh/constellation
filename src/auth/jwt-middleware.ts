@@ -28,9 +28,16 @@ export interface JWTPayload {
 }
 
 /**
+ * Express Request with authenticated user
+ */
+export interface AuthenticatedRequest extends Request {
+  user?: User;
+}
+
+/**
  * Create JWT middleware for Express
  */
-export function createJWTMiddleware(config: JWTConfig) {
+export function createJWTMiddleware(config: JWTConfig): (req: Request, res: Response, next: NextFunction) => void {
   // Allow disabling auth for development
   if (!config.enabled) {
     return (_req: Request, _res: Response, next: NextFunction) => {
@@ -81,7 +88,7 @@ export function createJWTMiddleware(config: JWTConfig) {
       }
 
       // Attach to request
-      (req as any).user = user;
+      (req as AuthenticatedRequest).user = user;
       
       logger.debug({
         userId: user.id,
@@ -146,7 +153,7 @@ export function generateToken(
  * Extract user from Express request (after middleware)
  */
 export function getUserFromRequest(req: Request): User | undefined {
-  return (req as any).user;
+  return (req as AuthenticatedRequest).user;
 }
 
 /**
