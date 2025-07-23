@@ -1,0 +1,21 @@
+# Simple librarian registry
+# Just list your functions - that's it!
+
+librarians:
+  - id: weather
+    name: Weather Assistant
+    function: ./weather-librarian.ts
+    
+  - id: greeting
+    name: Friendly Greeter
+    function: ./greeting-librarian.ts
+    
+  - id: math
+    name: Math Helper
+    function: ./math-librarian.ts
+
+# That's it! No complex configuration needed.
+# Each librarian is just:
+#   - id: unique identifier
+#   - name: human-readable name (optional)
+#   - function: path to your function file
