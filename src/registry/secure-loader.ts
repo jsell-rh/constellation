@@ -14,6 +14,7 @@ import type { SimpleRouter } from '../core/router';
 import type { CircuitBreakerConfig } from '../resilience/circuit-breaker';
 import type { LibrarianCacheConfig } from '../cache/interface';
 import { getCacheManager } from '../cache/cache-manager';
+import { getLibrarianRegistry } from './librarian-registry';
 import pino from 'pino';
 
 const logger = pino({
@@ -262,9 +263,13 @@ async function loadLibrarianFunction(functionPath: string): Promise<Librarian> {
  */
 export async function loadLibrarians(registryPath: string, router: SimpleRouter): Promise<void> {
   const registry = await loadRegistry(registryPath);
+  const librarianRegistry = getLibrarianRegistry();
 
   for (const entry of registry.librarians) {
     try {
+      // Register entry in global registry
+      librarianRegistry.register(entry);
+
       // Load the function
       const librarianFn = await loadLibrarianFunction(entry.function);
 
