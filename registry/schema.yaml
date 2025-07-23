@@ -151,28 +151,37 @@ definitions:
 
   circuitBreaker:
     type: object
-    required:
-      - error_threshold_percent
-      - timeout_ms
-      - reset_timeout_ms
     properties:
       enabled:
         type: boolean
         default: true
-      error_threshold_percent:
+        description: "Whether circuit breaker is enabled"
+      failureThreshold:
+        type: number
+        minimum: 0
+        maximum: 1
+        default: 0.5
+        description: "Failure rate threshold (0-1) before opening"
+      volumeThreshold:
         type: integer
         minimum: 1
-        maximum: 100
-      volume_threshold:
-        type: integer
-        minimum: 1
-        default: 10
-      timeout_ms:
-        type: integer
-        minimum: 100
-      reset_timeout_ms:
+        default: 20
+        description: "Minimum requests before calculating failure rate"
+      windowSize:
         type: integer
         minimum: 1000
+        default: 60000
+        description: "Time window in ms for failure rate calculation"
+      timeout:
+        type: integer
+        minimum: 1000
+        default: 60000
+        description: "Time in ms before attempting to close circuit"
+      successThreshold:
+        type: integer
+        minimum: 1
+        default: 5
+        description: "Successful requests needed to close from half-open"
 
   retry:
     type: object
