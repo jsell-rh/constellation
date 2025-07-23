@@ -9,6 +9,7 @@ import type { Librarian, Context, Response, TraceContext } from '../types/core';
 import type { AIClient } from '../ai/interface';
 import { isValidResponse } from '../types/librarian-factory';
 import { withSpan, addSpanAttributes, addSpanEvent, getCurrentTraceId, getCurrentSpanId, SpanKind } from '../observability';
+import { getCircuitBreakerManager } from '../resilience/circuit-breaker-manager';
 
 export interface ExecutorOptions {
   /** Default timeout in milliseconds */
@@ -107,10 +108,15 @@ export class LibrarianExecutor extends EventEmitter {
           
           addSpanEvent('librarian.execution.start');
           
+          // Get circuit breaker for this librarian
+          const librarianId = context.librarian?.id || 'unknown';
+          const circuitBreakerConfig = context.librarian?.circuitBreaker;
+          const circuitBreaker = getCircuitBreakerManager().getBreaker(librarianId, circuitBreakerConfig);
+          
+          // Execute with circuit breaker protection
           const response = await this.executeWithTimeout(
-            librarian(query, enrichedContext),
+            circuitBreaker.execute(() => librarian(query, enrichedContext)),
             timeout,
-            query,
           );
 
           addSpanEvent('librarian.execution.complete');
@@ -165,6 +171,11 @@ export class LibrarianExecutor extends EventEmitter {
             error: error instanceof Error ? error.message : 'Unknown error',
           });
           
+          // Check if it's a circuit breaker error (already a Response)
+          if (error && typeof error === 'object' && 'error' in error && isValidResponse(error as Response)) {
+            return error as Response;
+          }
+          
           const errorResponse = this.handleExecutionError(error as Error, query, enrichedContext);
           
           // Emit error event
@@ -192,6 +203,16 @@ export class LibrarianExecutor extends EventEmitter {
    * Create a new trace context using OpenTelemetry or generate one
    */
   createTraceContext(parentTrace?: TraceContext): TraceContext {
+    // If parent trace is provided, preserve its trace ID
+    if (parentTrace) {
+      return {
+        traceId: parentTrace.traceId,
+        spanId: this.generateId(),
+        parentSpanId: parentTrace.spanId,
+        startTime: Date.now(),
+      };
+    }
+    
     // Try to use OpenTelemetry trace context first
     const otelTraceId = getCurrentTraceId();
     const otelSpanId = getCurrentSpanId();
@@ -200,17 +221,6 @@ export class LibrarianExecutor extends EventEmitter {
       return {
         traceId: otelTraceId,
         spanId: otelSpanId,
-        ...(parentTrace?.spanId && { parentSpanId: parentTrace.spanId }),
-        startTime: Date.now(),
-      };
-    }
-    
-    // Fallback to manual trace context
-    if (parentTrace) {
-      return {
-        traceId: parentTrace.traceId,
-        spanId: this.generateId(),
-        parentSpanId: parentTrace.spanId,
         startTime: Date.now(),
       };
     }
@@ -239,34 +249,32 @@ export class LibrarianExecutor extends EventEmitter {
   /**
    * Execute with timeout
    */
-  private async executeWithTimeout(
-    promise: Promise<Response>,
+  private async executeWithTimeout<T>(
+    promise: Promise<T>,
     timeoutMs: number,
-    query: string,
-  ): Promise<Response> {
-    const timeoutPromise = new Promise<Response>((_, reject) => {
+  ): Promise<T> {
+    const timeoutPromise = new Promise<T>((_, reject) => {
       setTimeout(() => {
         reject(new Error(`Execution timeout after ${timeoutMs}ms`));
       }, timeoutMs);
     });
 
-    try {
-      return await Promise.race([promise, timeoutPromise]);
-    } catch (error) {
-      if (error instanceof Error && error.message.includes('timeout')) {
-        return this.createErrorResponse('TIMEOUT', error.message, {
-          query,
-          timeoutMs,
-        });
-      }
-      throw error;
-    }
+    return Promise.race([promise, timeoutPromise]);
   }
 
   /**
    * Handle execution errors
    */
   private handleExecutionError(error: Error, query: string, context: Context): Response {
+    // Handle timeout errors specifically
+    if (error.message.includes('timeout')) {
+      return this.createErrorResponse('TIMEOUT', error.message, {
+        query,
+        librarian: context.librarian?.id,
+        timeout: context.timeout ?? this.options.defaultTimeout,
+      });
+    }
+    
     // This should rarely happen as createLibrarian catches errors
     // But we handle it as a safety net
     return this.createErrorResponse(
