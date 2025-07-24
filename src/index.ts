@@ -10,7 +10,8 @@ import { runMCPServer } from './mcp/server';
 import { createLibrarian } from './types/librarian-factory';
 import { createAIClientFromEnv } from './ai/client';
 import { loadLibrarians } from './registry/secure-loader';
-import { initializeTracing } from './observability';
+import { initializeTracing, initializeMetricsEndpoint } from './observability';
+import express from 'express';
 import pino from 'pino';
 
 const logger = pino({
@@ -27,23 +28,41 @@ export * from './mcp';
  */
 async function main(): Promise<void> {
   logger.info('Starting Constellation MCP Server');
-  
+
   console.log('🚀 Starting Constellation...\n');
-  
+
   // Initialize OpenTelemetry tracing
   initializeTracing({
     serviceName: 'constellation',
     enabled: process.env.TRACE_ENABLED === 'true',
   });
 
+  // Initialize Prometheus metrics endpoint if enabled
+  if (process.env.METRICS_ENABLED !== 'false') {
+    const metricsApp = express();
+    const metricsPort = parseInt(process.env.METRICS_PORT || '9090');
+
+    // Add metrics endpoint
+    initializeMetricsEndpoint(metricsApp, metricsPort);
+
+    // Start the metrics server
+    metricsApp.listen(metricsPort, () => {
+      logger.info({ port: metricsPort }, 'Prometheus metrics server started');
+      console.log(`📊 Metrics available at http://localhost:${metricsPort}/metrics`);
+    });
+  }
+
   // Initialize AI client (optional - only if configured)
   let aiClient = null;
   try {
     aiClient = createAIClientFromEnv();
-    logger.info({
-      defaultProvider: aiClient.defaultProvider.name,
-      availableProviders: aiClient.getAvailableProviders(),
-    }, 'AI client initialized');
+    logger.info(
+      {
+        defaultProvider: aiClient.defaultProvider.name,
+        availableProviders: aiClient.getAvailableProviders(),
+      },
+      'AI client initialized',
+    );
   } catch (error) {
     logger.warn('No AI providers configured - librarians will run without AI capabilities');
   }
@@ -58,23 +77,24 @@ async function main(): Promise<void> {
 
   // Load librarians from secure registry
   const registryPath = process.env.REGISTRY_PATH || './registry/constellation-registry.yaml';
-  
+
   try {
     logger.info({ path: registryPath }, 'Loading librarians from registry');
     await loadLibrarians(registryPath, router);
-    
+
     // Add AI client to router context for librarians that need it
     if (aiClient) {
       router.setDefaultContext({ ai: aiClient });
     }
   } catch (error) {
     logger.error({ error, path: registryPath }, 'Failed to load registry');
-    
+
     // Fallback: Register a minimal hello librarian
     logger.warn('Registering fallback hello librarian');
     const helloLibrarian = createLibrarian((_query) => {
       return Promise.resolve({
-        answer: 'Registry loading failed. This is a fallback librarian. Please check your registry configuration.',
+        answer:
+          'Registry loading failed. This is a fallback librarian. Please check your registry configuration.',
         error: {
           code: 'REGISTRY_LOAD_FAILED',
           message: 'Could not load librarians from registry',
@@ -82,13 +102,16 @@ async function main(): Promise<void> {
         },
       });
     });
-    
-    router.register({
-      id: 'hello-fallback',
-      name: 'Fallback Hello',
-      description: 'Emergency fallback librarian',
-      capabilities: ['greeting'],
-    }, helloLibrarian);
+
+    router.register(
+      {
+        id: 'hello-fallback',
+        name: 'Fallback Hello',
+        description: 'Emergency fallback librarian',
+        capabilities: ['greeting'],
+      },
+      helloLibrarian,
+    );
   }
 
   const librarianCount = router.getAllLibrarians().length;

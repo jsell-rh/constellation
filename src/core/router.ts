@@ -15,6 +15,7 @@ import {
   recordQuery,
   recordQueryDuration,
   recordResponseMetrics,
+  librarianRegistrations,
 } from '../observability';
 import pino from 'pino';
 
@@ -55,6 +56,9 @@ export class SimpleRouter {
     // Store librarian and metadata
     this.librarians.set(metadata.id, librarian);
     this.metadata.set(metadata.id, metadata);
+
+    // Update metrics - just set total count without labels
+    librarianRegistrations.set({}, this.librarians.size);
   }
 
   /**
