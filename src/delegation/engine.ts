@@ -16,6 +16,7 @@ import {
   AIAggregator,
 } from './aggregator';
 import { getAIClient } from '../ai/client';
+import { withSpan, SpanAttributes, SpanNames } from '../observability';
 import pino from 'pino';
 
 const logger = pino({
@@ -103,147 +104,163 @@ export class DelegationEngine {
    * Route a query to the most appropriate librarian(s)
    */
   async route(query: string, context: Context): Promise<Response> {
-    logger.info({ query }, 'Delegation engine routing query');
+    return withSpan(SpanNames.AI_DELEGATION, async (span) => {
+      span.setAttributes({
+        [SpanAttributes.QUERY_TEXT]: query,
+        [SpanAttributes.QUERY_USER_ID]: context.user?.id || 'anonymous',
+        [SpanAttributes.DELEGATION_TYPE]: 'ai-powered',
+      });
 
-    // Get all available librarians
-    const allLibrarians = this.router.getAllLibrarians();
+      logger.info({ query }, 'Delegation engine routing query');
 
-    if (allLibrarians.length === 0) {
-      return errorResponse('NO_LIBRARIANS', 'No librarians available to handle queries');
-    }
+      // Get all available librarians
+      const allLibrarians = this.router.getAllLibrarians();
 
-    // Get librarian metadata for AI analysis
-    const librarianInfos = allLibrarians
-      .map((id) => {
-        const metadata = this.router.getMetadata(id);
-        return metadata || null;
-      })
-      .filter((info): info is NonNullable<typeof info> => info !== null);
+      if (allLibrarians.length === 0) {
+        return errorResponse('NO_LIBRARIANS', 'No librarians available to handle queries');
+      }
 
-    // Use AI-powered routing if available
-    let decision: DelegationDecision;
-    let engine: string;
-    let analysisContext: Record<string, any> | undefined;
+      // Get librarian metadata for AI analysis
+      const librarianInfos = allLibrarians
+        .map((id) => {
+          const metadata = this.router.getMetadata(id);
+          return metadata || null;
+        })
+        .filter((info): info is NonNullable<typeof info> => info !== null);
 
-    if (this.aiAnalyzer && context.ai) {
-      try {
-        logger.debug('Using AI-powered query analysis');
-        const analysis = await this.aiAnalyzer.analyze(query, librarianInfos, context);
-        decision = analysis.decision;
-        engine = 'ai-powered';
+      // Use AI-powered routing if available
+      let decision: DelegationDecision;
+      let engine: string;
+      let analysisContext: Record<string, any> | undefined;
 
-        // Store analysis context for aggregation
-        analysisContext = {
-          intent: analysis.queryIntent,
-          capabilities: analysis.requiredCapabilities,
-          reasoning: analysis.decision.reasoning,
-          candidates: analysis.candidates.length,
-        };
+      if (this.aiAnalyzer && context.ai) {
+        try {
+          logger.debug('Using AI-powered query analysis');
+          const analysis = await this.aiAnalyzer.analyze(query, librarianInfos, context);
+          decision = analysis.decision;
+          engine = 'ai-powered';
 
-        logger.info(
-          {
+          // Store analysis context for aggregation
+          analysisContext = {
             intent: analysis.queryIntent,
             capabilities: analysis.requiredCapabilities,
+            reasoning: analysis.decision.reasoning,
             candidates: analysis.candidates.length,
-          },
-          'AI analysis complete',
-        );
-      } catch (error) {
-        logger.error({ error }, 'AI analysis failed, falling back to simple routing');
+          };
+
+          logger.info(
+            {
+              intent: analysis.queryIntent,
+              capabilities: analysis.requiredCapabilities,
+              candidates: analysis.candidates.length,
+            },
+            'AI analysis complete',
+          );
+        } catch (error) {
+          logger.error({ error }, 'AI analysis failed, falling back to simple routing');
+          decision = this.analyzeQuery(query, context);
+          engine = 'simple-fallback';
+        }
+      } else {
+        // Fallback to simple keyword matching
         decision = this.analyzeQuery(query, context);
-        engine = 'simple-fallback';
+        engine = 'simple';
       }
-    } else {
-      // Fallback to simple keyword matching
-      decision = this.analyzeQuery(query, context);
-      engine = 'simple';
-    }
 
-    if (decision.librarians.length === 0) {
-      return errorResponse('NO_MATCH', 'No suitable librarian found for your query', {
-        suggestion: 'Try rephrasing your question or ask for available capabilities',
-        details: { reasoning: decision.reasoning },
-      });
-    }
-
-    // Determine how many librarians to query
-    const librariansToQuery = this.enableParallelRouting
-      ? decision.librarians.slice(0, this.maxParallelQueries)
-      : [decision.librarians[0]];
-
-    logger.info(
-      {
-        librarians: librariansToQuery,
-        decision,
-        engine,
-        parallelRouting: this.enableParallelRouting,
-      },
-      'Routing to librarian(s)',
-    );
-
-    // Execute queries
-    let response: Response;
-
-    if (librariansToQuery.length === 1) {
-      // Single librarian query
-      const firstLibrarian = librariansToQuery[0];
-      if (!firstLibrarian) {
-        return errorResponse('NO_LIBRARIAN', 'No librarian to query');
+      if (decision.librarians.length === 0) {
+        return errorResponse('NO_MATCH', 'No suitable librarian found for your query', {
+          suggestion: 'Try rephrasing your question or ask for available capabilities',
+          details: { reasoning: decision.reasoning },
+        });
       }
-      response = await this.executor.execute(query, firstLibrarian, context);
-    } else {
-      // Parallel query to multiple librarians
-      const promises = librariansToQuery
-        .filter((id): id is string => id !== undefined)
-        .map((librarianId) =>
-          this.executor
-            .execute(query, librarianId, {
-              ...context,
-              metadata: {
-                ...context.metadata,
-                librarian: librarianId,
-              },
-            })
-            .catch(
-              (error: Error): Response => ({
-                error: {
-                  code: 'EXECUTION_ERROR',
-                  message: error.message,
-                  librarian: librarianId,
-                },
-              }),
-            ),
-        );
 
-      const responses = await Promise.all(promises);
+      // Determine how many librarians to query
+      const librariansToQuery = this.enableParallelRouting
+        ? decision.librarians.slice(0, this.maxParallelQueries)
+        : [decision.librarians[0]];
 
       logger.info(
         {
-          totalResponses: responses.length,
-          successfulResponses: responses.filter((r) => !r.error).length,
+          librarians: librariansToQuery,
+          decision,
+          engine,
+          parallelRouting: this.enableParallelRouting,
         },
-        'Received responses from multiple librarians',
+        'Routing to librarian(s)',
       );
 
-      response = await this.aggregator.aggregate(responses, query, analysisContext);
-    }
+      // Execute queries
+      let response: Response;
 
-    // Add delegation metadata
-    if (!response.error) {
-      response.metadata = {
-        ...response.metadata,
-        delegation: {
-          engine,
-          decision: decision.librarians,
-          reasoning: decision.reasoning,
-          confidence: decision.confidence,
-          queriedLibrarians: librariansToQuery,
-          parallelRouting: this.enableParallelRouting && librariansToQuery.length > 1,
-        },
-      };
-    }
+      if (librariansToQuery.length === 1) {
+        // Single librarian query
+        const firstLibrarian = librariansToQuery[0];
+        if (!firstLibrarian) {
+          return errorResponse('NO_LIBRARIAN', 'No librarian to query');
+        }
+        response = await this.executor.execute(query, firstLibrarian, context);
+      } else {
+        // Parallel query to multiple librarians
+        const promises = librariansToQuery
+          .filter((id): id is string => id !== undefined)
+          .map((librarianId) =>
+            this.executor
+              .execute(query, librarianId, {
+                ...context,
+                metadata: {
+                  ...context.metadata,
+                  librarian: librarianId,
+                },
+              })
+              .catch(
+                (error: Error): Response => ({
+                  error: {
+                    code: 'EXECUTION_ERROR',
+                    message: error.message,
+                    librarian: librarianId,
+                  },
+                }),
+              ),
+          );
 
-    return response;
+        const responses = await Promise.all(promises);
+
+        logger.info(
+          {
+            totalResponses: responses.length,
+            successfulResponses: responses.filter((r) => !r.error).length,
+          },
+          'Received responses from multiple librarians',
+        );
+
+        response = await this.aggregator.aggregate(responses, query, analysisContext);
+      }
+
+      // Add delegation metadata
+      if (!response.error) {
+        response.metadata = {
+          ...response.metadata,
+          delegation: {
+            engine,
+            decision: decision.librarians,
+            reasoning: decision.reasoning,
+            confidence: decision.confidence,
+            queriedLibrarians: librariansToQuery,
+            parallelRouting: this.enableParallelRouting && librariansToQuery.length > 1,
+          },
+        };
+      }
+
+      // Add final delegation metadata to span
+      if (!response.error) {
+        span.setAttributes({
+          [SpanAttributes.DELEGATION_CHAIN_DEPTH]: librariansToQuery.length,
+          [SpanAttributes.RESPONSE_CONFIDENCE]: response.confidence || 0,
+        });
+      }
+
+      return response;
+    });
   }
 
   /**

@@ -6,6 +6,7 @@
 import { LibrarianExecutor } from './executor';
 import type { Librarian, Context, Response, LibrarianInfo } from '../types/core';
 import { errorResponse } from '../types/librarian-factory';
+import { withSpan, SpanAttributes, SpanNames } from '../observability';
 import pino from 'pino';
 
 const logger = pino({
@@ -51,37 +52,71 @@ export class SimpleRouter {
    * Route a query to a specific librarian
    */
   async route(query: string, librarianId: string, context: Context = {}): Promise<Response> {
-    // Get the librarian
-    const librarian = this.librarians.get(librarianId);
-    if (!librarian) {
-      return errorResponse('LIBRARIAN_NOT_FOUND', `Librarian '${librarianId}' not found`, {
-        librarian: librarianId,
-        details: {
-          availableLibrarians: this.getAllLibrarians(),
-        },
+    return withSpan(SpanNames.QUERY_ROUTING, async (span) => {
+      // Add span attributes
+      span.setAttributes({
+        [SpanAttributes.QUERY_TEXT]: query,
+        [SpanAttributes.LIBRARIAN_ID]: librarianId,
+        [SpanAttributes.QUERY_USER_ID]: context.user?.id || 'anonymous',
       });
-    }
 
-    // Get metadata and enrich context with defaults
-    const librarianInfo = this.metadata.get(librarianId);
-    const enrichedContext: Context = {
-      ...this.defaultContext,
-      ...context,
-      ...(librarianInfo && { librarian: librarianInfo }),
-    };
+      // Get the librarian
+      const librarian = this.librarians.get(librarianId);
+      if (!librarian) {
+        span.addEvent('librarian_not_found', {
+          [SpanAttributes.LIBRARIAN_ID]: librarianId,
+          available_librarians: this.getAllLibrarians().join(','),
+        });
 
-    logger.debug(
-      {
-        librarianId,
-        hasUser: !!enrichedContext.user,
-        userId: enrichedContext.user?.id,
-        userTeams: enrichedContext.user?.teams,
-      },
-      'Router passing context to executor',
-    );
+        return errorResponse('LIBRARIAN_NOT_FOUND', `Librarian '${librarianId}' not found`, {
+          librarian: librarianId,
+          details: {
+            availableLibrarians: this.getAllLibrarians(),
+          },
+        });
+      }
 
-    // Execute using the executor
-    return this.executor.execute(librarian, query, enrichedContext);
+      // Get metadata and enrich context with defaults
+      const librarianInfo = this.metadata.get(librarianId);
+      const enrichedContext: Context = {
+        ...this.defaultContext,
+        ...context,
+        ...(librarianInfo && { librarian: librarianInfo }),
+      };
+
+      // Add librarian metadata to span
+      if (librarianInfo) {
+        span.setAttributes({
+          [SpanAttributes.LIBRARIAN_NAME]: librarianInfo.name,
+          [SpanAttributes.LIBRARIAN_VERSION]: 'unknown',
+        });
+      }
+
+      logger.debug(
+        {
+          librarianId,
+          hasUser: !!enrichedContext.user,
+          userId: enrichedContext.user?.id,
+          userTeams: enrichedContext.user?.teams,
+        },
+        'Router passing context to executor',
+      );
+
+      span.addEvent('executing_librarian');
+
+      // Execute using the executor
+      const response = await this.executor.execute(librarian, query, enrichedContext);
+
+      // Add response attributes
+      if (response.confidence !== undefined) {
+        span.setAttribute(SpanAttributes.RESPONSE_CONFIDENCE, response.confidence);
+      }
+      if (response.sources) {
+        span.setAttribute(SpanAttributes.RESPONSE_SOURCE_COUNT, response.sources.length);
+      }
+
+      return response;
+    });
   }
 
   /**

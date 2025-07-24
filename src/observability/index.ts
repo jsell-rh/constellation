@@ -3,11 +3,11 @@
  * Provides tracing, metrics, and logging for Constellation
  */
 
-// Use simplified tracing to avoid version conflicts
-export * from './simple-tracing';
+// Main tracing implementation
+export * from './tracing';
 
 // Re-export commonly used OpenTelemetry types
-export { 
+export {
   SpanStatusCode,
   SpanKind,
   type Span,
