@@ -7,7 +7,7 @@ librarians:
   # Public librarians - no authentication required
   - id: hello
     name: Hello World
-    function: ./src/librarians/hello-librarian.ts
+    function: ./dist/src/librarians/hello-librarian.js
     team: platform
     description: A friendly greeting librarian
     permissions:
@@ -15,7 +15,7 @@ librarians:
 
   - id: docs
     name: Documentation Helper
-    function: ./src/librarians/docs-librarian.ts
+    function: ./dist/src/librarians/docs-librarian.js
     team: platform
     description: Answers questions about Constellation documentation
     permissions:
@@ -24,7 +24,7 @@ librarians:
   # AI-powered librarians - team access required
   - id: ai-assistant
     name: AI Assistant
-    function: ./src/librarians/ai-assistant-librarian.ts
+    function: ./dist/src/librarians/ai-assistant-librarian.js
     team: platform
     description: General purpose AI assistant
     permissions:
@@ -47,7 +47,7 @@ librarians:
 
   - id: kubernetes-expert
     name: Kubernetes Expert
-    function: ./src/librarians/kubernetes-expert-librarian.ts
+    function: ./dist/src/librarians/kubernetes-expert-librarian.js
     team: sre
     description: Specialized Kubernetes and cloud-native assistant
     permissions:
@@ -63,7 +63,7 @@ librarians:
 
   - id: code-reviewer
     name: Code Reviewer
-    function: ./src/librarians/code-review-librarian.ts
+    function: ./dist/src/librarians/code-review-librarian.js
     team: engineering
     description: AI-powered code review and security analysis
     permissions:
@@ -75,7 +75,7 @@ librarians:
   # Example team-specific librarians
   - id: deployment-helper
     name: Deployment Assistant
-    function: ./src/librarians/deployment-librarian.ts
+    function: ./dist/src/librarians/deployment-librarian.js
     team: platform
     description: Helps with deployment configurations and troubleshooting
     permissions:
@@ -86,7 +86,7 @@ librarians:
   # Example sensitive data librarian
   - id: metrics-analyzer
     name: Metrics Analyzer
-    function: ./src/librarians/metrics-librarian.ts
+    function: ./dist/src/librarians/metrics-librarian.js
     team: analytics
     description: Analyzes system metrics and performance data
     permissions:

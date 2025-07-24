@@ -5,13 +5,17 @@
 
 import type { Context, Response } from '../types/core';
 
-export default async function kubernetesExpertLibrarian(query: string, context?: Context): Promise<Response> {
+export default async function kubernetesExpertLibrarian(
+  query: string,
+  context?: Context,
+): Promise<Response> {
   // Check if AI is available
   if (!context?.ai) {
     return {
       error: {
         code: 'AI_NOT_CONFIGURED',
-        message: 'AI capabilities are not configured. Please set up an AI provider in your environment.',
+        message:
+          'AI capabilities are not configured. Please set up an AI provider in your environment.',
         recoverable: true,
       },
     };
@@ -19,7 +23,7 @@ export default async function kubernetesExpertLibrarian(query: string, context?:
 
   try {
     // Use AI with Kubernetes expertise
-    const prompt = `You are a Kubernetes and cloud-native expert that is part of the Constellation distributed knowledge system. 
+    const prompt = `You are a Kubernetes and cloud-native expert that is part of the Constellation distributed knowledge system.
 You have deep knowledge of:
 - Kubernetes architecture and components
 - Container orchestration patterns
@@ -35,7 +39,6 @@ ${query}`;
 
     const answer = await context.ai.ask(prompt, {
       temperature: 0.3, // Lower temperature for more focused technical answers
-      max_tokens: 800,
     });
 
     return {
@@ -51,7 +54,9 @@ ${query}`;
     return {
       error: {
         code: 'AI_GENERATION_FAILED',
-        message: `Failed to generate Kubernetes expertise: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        message: `Failed to generate Kubernetes expertise: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`,
         recoverable: true,
       },
     };

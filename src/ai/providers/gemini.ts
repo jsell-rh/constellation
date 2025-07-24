@@ -55,7 +55,15 @@ export class GeminiProvider implements AIProvider {
 
     try {
       const temperature = options.temperature ?? this.config.temperature;
-      const maxTokens = options.max_tokens ?? this.config.maxTokens;
+      let maxTokens = options.max_tokens ?? this.config.maxTokens;
+
+      // Gemini has issues with small max_tokens values
+      // Testing shows that Gemini needs at least 1500 tokens for complex prompts
+      // and returns empty responses when the limit is too low
+      if (maxTokens !== undefined && maxTokens < 1500) {
+        console.warn(`Gemini: max_tokens ${maxTokens} is too small, using minimum of 1500`);
+        maxTokens = 1500;
+      }
 
       const completion = await this.client.chat.completions.create({
         model: this.config.model!,
@@ -106,7 +114,14 @@ export class GeminiProvider implements AIProvider {
     const openAIMessages = this.convertMessages(messages, options.system);
 
     const temperature = options.temperature ?? this.config.temperature;
-    const maxTokens = options.max_tokens ?? this.config.maxTokens;
+    let maxTokens = options.max_tokens ?? this.config.maxTokens;
+
+    // Gemini has issues with small max_tokens values
+    // Testing shows that Gemini needs at least 1500 tokens for complex prompts
+    if (maxTokens !== undefined && maxTokens < 1500) {
+      console.warn(`Gemini: max_tokens ${maxTokens} is too small, using minimum of 1500`);
+      maxTokens = 1500;
+    }
 
     const stream = await this.client.chat.completions.create({
       model: this.config.model!,

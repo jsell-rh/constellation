@@ -8,6 +8,7 @@ import type { Context, Response } from '../types/core';
 import type { AIClient } from '../ai/interface';
 import { errorResponse } from '../types/librarian-factory';
 import { AIQueryAnalyzer } from './ai-analyzer';
+import { DelegationExecutor } from './executor';
 import { getAIClient } from '../ai/client';
 import pino from 'pino';
 
@@ -31,11 +32,13 @@ export interface DelegationEngineOptions {
  */
 export class DelegationEngine {
   private aiAnalyzer?: AIQueryAnalyzer;
+  private executor: DelegationExecutor;
 
   constructor(
     private router: SimpleRouter,
     options: DelegationEngineOptions = {},
   ) {
+    this.executor = new DelegationExecutor(router);
     // Try to use provided AI client first, then fall back to global client
     try {
       const aiClient = options.aiClient || getAIClient();
@@ -118,7 +121,8 @@ export class DelegationEngine {
 
     logger.info({ librarian: primaryLibrarian, decision, engine }, 'Routing to librarian');
 
-    const response = await this.router.route(query, primaryLibrarian, context);
+    // Use the executor to handle delegation
+    const response = await this.executor.execute(query, primaryLibrarian, context);
 
     // Add delegation metadata
     if (!response.error) {
