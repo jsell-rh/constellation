@@ -15,6 +15,11 @@ import {
   getCurrentTraceId,
   getCurrentSpanId,
   SpanKind,
+  librarianExecutions,
+  librarianExecutionDuration,
+  cacheHits,
+  cacheMisses,
+  recordError,
 } from '../observability';
 import { getCircuitBreakerManager } from '../resilience/circuit-breaker-manager';
 import { getCacheManager } from '../cache/cache-manager';
@@ -77,6 +82,7 @@ export class LibrarianExecutor extends EventEmitter {
    */
   async execute(librarian: Librarian, query: string, context: Context = {}): Promise<Response> {
     const startTime = Date.now();
+    const librarianId = context.librarian?.id || 'unknown';
 
     // Enrich context
     const enrichedContext: Context = {
@@ -117,8 +123,6 @@ export class LibrarianExecutor extends EventEmitter {
 
           addSpanEvent('librarian.execution.start');
 
-          const librarianId = context.librarian?.id || 'unknown';
-
           // Check cache first
           const cacheManager = getCacheManager();
           const cachedResponse = await cacheManager.get(librarianId, query, enrichedContext);
@@ -128,6 +132,9 @@ export class LibrarianExecutor extends EventEmitter {
             addSpanAttributes({
               'cache.hit': true,
             });
+
+            // Record cache hit metric
+            cacheHits.inc({ librarian: librarianId, cache_type: 'response' });
 
             // Add cache metadata to response
             const responseWithMetadata: Response = {
@@ -156,6 +163,9 @@ export class LibrarianExecutor extends EventEmitter {
             'cache.hit': false,
           });
 
+          // Record cache miss metric
+          cacheMisses.inc({ librarian: librarianId, cache_type: 'response' });
+
           // Get circuit breaker for this librarian
           const circuitBreakerConfig = context.librarian?.circuitBreaker;
           const circuitBreaker = getCircuitBreakerManager().getBreaker(
@@ -164,12 +174,26 @@ export class LibrarianExecutor extends EventEmitter {
           );
 
           // Execute with circuit breaker protection
+          const execTimer = librarianExecutionDuration.startTimer({
+            librarian: librarianId,
+            team: context.librarian?.team || 'unknown',
+          });
+
           const response = await this.executeWithTimeout(
             circuitBreaker.execute(() => librarian(query, enrichedContext)),
             timeout,
           );
 
+          execTimer(); // Record execution duration
+
           addSpanEvent('librarian.execution.complete');
+
+          // Record execution metric
+          librarianExecutions.inc({
+            librarian: librarianId,
+            team: context.librarian?.team || 'unknown',
+            status: response.error ? 'error' : 'success',
+          });
 
           // Validate response if enabled
           if (this.options.validateResponses) {
@@ -242,6 +266,22 @@ export class LibrarianExecutor extends EventEmitter {
           }
 
           const errorResponse = this.handleExecutionError(error as Error, query, enrichedContext);
+
+          // Record error metric
+          recordError(error, {
+            type: 'librarian_execution',
+            librarian: librarianId,
+            ...(errorResponse.error?.recoverable !== undefined && {
+              recoverable: errorResponse.error.recoverable,
+            }),
+          });
+
+          // Record failed execution
+          librarianExecutions.inc({
+            librarian: librarianId,
+            team: context.librarian?.team || 'unknown',
+            status: 'error',
+          });
 
           // Emit error event
           this.emit('execute:error', {

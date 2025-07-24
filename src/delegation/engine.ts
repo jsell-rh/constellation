@@ -16,7 +16,15 @@ import {
   AIAggregator,
 } from './aggregator';
 import { getAIClient } from '../ai/client';
-import { withSpan, SpanAttributes, SpanNames } from '../observability';
+import {
+  withSpan,
+  SpanAttributes,
+  SpanNames,
+  delegationDecisions,
+  delegationChainDepth,
+  parallelDelegations,
+  recordResponseMetrics,
+} from '../observability';
 import pino from 'pino';
 
 const logger = pino({
@@ -51,6 +59,7 @@ export class DelegationEngine {
   private aggregator: ResponseAggregator;
   private enableParallelRouting: boolean;
   private maxParallelQueries: number;
+  private aggregationStrategy: string;
 
   constructor(
     private router: SimpleRouter,
@@ -76,6 +85,7 @@ export class DelegationEngine {
 
     // Initialize aggregator based on strategy
     const strategy = options.aggregationStrategy || 'best-confidence';
+    this.aggregationStrategy = strategy;
     switch (strategy) {
       case 'ai-powered':
         if (!aiClient) {
@@ -179,6 +189,24 @@ export class DelegationEngine {
         ? decision.librarians.slice(0, this.maxParallelQueries)
         : [decision.librarians[0]];
 
+      // Record delegation decision metrics
+      const confidenceLevel =
+        decision.confidence > 0.8 ? 'high' : decision.confidence > 0.5 ? 'medium' : 'low';
+
+      delegationDecisions.inc({
+        engine,
+        target_count: String(librariansToQuery.length),
+        confidence_level: confidenceLevel,
+      });
+
+      // Record chain depth
+      delegationChainDepth.observe(librariansToQuery.length);
+
+      // Record parallel delegations if applicable
+      if (librariansToQuery.length > 1) {
+        parallelDelegations.inc({ count: String(librariansToQuery.length) });
+      }
+
       logger.info(
         {
           librarians: librariansToQuery,
@@ -257,6 +285,13 @@ export class DelegationEngine {
           [SpanAttributes.DELEGATION_CHAIN_DEPTH]: librariansToQuery.length,
           [SpanAttributes.RESPONSE_CONFIDENCE]: response.confidence || 0,
         });
+
+        // Record response metrics
+        const aggregationStrategy =
+          this.enableParallelRouting && librariansToQuery.length > 1
+            ? this.aggregationStrategy || 'best-confidence'
+            : 'none';
+        recordResponseMetrics(response, 'delegation_engine', aggregationStrategy);
       }
 
       return response;

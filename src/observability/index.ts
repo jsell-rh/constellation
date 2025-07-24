@@ -6,6 +6,9 @@
 // Main tracing implementation
 export * from './tracing';
 
+// Prometheus metrics
+export * from './metrics';
+
 // Re-export commonly used OpenTelemetry types
 export {
   SpanStatusCode,

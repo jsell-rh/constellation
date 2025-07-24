@@ -5,23 +5,28 @@
 
 import { EventEmitter } from 'events';
 import type { Response } from '../types/core';
+import {
+  circuitBreakerState,
+  circuitBreakerTrips,
+  circuitBreakerRejections,
+} from '../observability/metrics';
 
 export interface CircuitBreakerConfig {
   /** Name of the circuit breaker (usually librarian ID) */
   name: string;
-  
+
   /** Failure threshold percentage (0-1) before opening circuit */
   failureThreshold?: number;
-  
+
   /** Minimum number of requests before calculating failure rate */
   volumeThreshold?: number;
-  
+
   /** Time window in ms for calculating failure rate */
   windowSize?: number;
-  
+
   /** Time in ms before attempting to close circuit */
   timeout?: number;
-  
+
   /** Number of successful requests needed to close circuit from half-open */
   successThreshold?: number;
 }
@@ -52,23 +57,23 @@ export class CircuitBreaker extends EventEmitter {
 
   constructor(config: CircuitBreakerConfig) {
     super();
-    
+
     // Set defaults
     this.config = {
       name: config.name,
       failureThreshold: config.failureThreshold ?? 0.5, // 50% failure rate
-      volumeThreshold: config.volumeThreshold ?? 20,   // Min 20 requests
-      windowSize: config.windowSize ?? 60000,           // 1 minute window
-      timeout: config.timeout ?? 60000,                 // 1 minute timeout
-      successThreshold: config.successThreshold ?? 5,   // 5 successes to close
+      volumeThreshold: config.volumeThreshold ?? 20, // Min 20 requests
+      windowSize: config.windowSize ?? 60000, // 1 minute window
+      timeout: config.timeout ?? 60000, // 1 minute timeout
+      successThreshold: config.successThreshold ?? 5, // 5 successes to close
     };
-    
+
     this.state = {
       status: 'closed',
       failures: 0,
       successes: 0,
     };
-    
+
     this.metrics = {
       totalRequests: 0,
       failedRequests: 0,
@@ -77,6 +82,9 @@ export class CircuitBreaker extends EventEmitter {
       status: 'closed',
       lastStateChange: Date.now(),
     };
+
+    // Initialize circuit breaker state metric
+    circuitBreakerState.set({ librarian: this.config.name }, 0); // 0 = closed
   }
 
   /**
@@ -86,7 +94,11 @@ export class CircuitBreaker extends EventEmitter {
     // Check if we should attempt the request
     if (!this.canExecute()) {
       this.metrics.rejectedRequests++;
-      this.emit('rejected', { 
+      circuitBreakerRejections.inc({
+        librarian: this.config.name,
+        state: this.state.status,
+      });
+      this.emit('rejected', {
         name: this.config.name,
         state: this.state.status,
       });
@@ -99,24 +111,24 @@ export class CircuitBreaker extends EventEmitter {
     try {
       const result = await fn();
       this.recordSuccess();
-      
+
       this.emit('success', {
         name: this.config.name,
         duration: Date.now() - startTime,
         state: this.state.status,
       });
-      
+
       return result;
     } catch (error) {
       this.recordFailure();
-      
+
       this.emit('failure', {
         name: this.config.name,
         duration: Date.now() - startTime,
         error,
         state: this.state.status,
       });
-      
+
       throw error;
     }
   }
@@ -130,7 +142,7 @@ export class CircuitBreaker extends EventEmitter {
     switch (this.state.status) {
       case 'closed':
         return true;
-        
+
       case 'open':
         // Check if timeout has passed
         if (this.state.nextAttemptTime && Date.now() >= this.state.nextAttemptTime) {
@@ -138,11 +150,11 @@ export class CircuitBreaker extends EventEmitter {
           return true;
         }
         return false;
-        
+
       case 'half-open':
         // Allow limited requests in half-open state
         return true;
-        
+
       default:
         return false;
     }
@@ -159,14 +171,14 @@ export class CircuitBreaker extends EventEmitter {
       case 'closed':
         // Nothing special to do
         break;
-        
+
       case 'half-open':
         this.halfOpenSuccesses++;
         if (this.halfOpenSuccesses >= this.config.successThreshold) {
           this.transitionTo('closed');
         }
         break;
-        
+
       case 'open':
         // Shouldn't happen, but handle gracefully
         this.transitionTo('half-open');
@@ -189,12 +201,12 @@ export class CircuitBreaker extends EventEmitter {
           this.transitionTo('open');
         }
         break;
-        
+
       case 'half-open':
         // Any failure in half-open state reopens the circuit
         this.transitionTo('open');
         break;
-        
+
       case 'open':
         // Already open, update next attempt time
         this.state.nextAttemptTime = Date.now() + this.config.timeout;
@@ -207,7 +219,7 @@ export class CircuitBreaker extends EventEmitter {
    */
   private shouldOpen(): boolean {
     const recentRequests = this.requestCounts.filter(
-      req => req.timestamp > Date.now() - this.config.windowSize
+      (req) => req.timestamp > Date.now() - this.config.windowSize,
     );
 
     // Not enough requests to make a decision
@@ -215,7 +227,7 @@ export class CircuitBreaker extends EventEmitter {
       return false;
     }
 
-    const failures = recentRequests.filter(req => !req.success).length;
+    const failures = recentRequests.filter((req) => !req.success).length;
     const failureRate = failures / recentRequests.length;
 
     return failureRate >= this.config.failureThreshold;
@@ -230,15 +242,27 @@ export class CircuitBreaker extends EventEmitter {
     this.metrics.status = newState;
     this.metrics.lastStateChange = Date.now();
 
+    // Record circuit breaker state metrics
+    const stateValue = newState === 'closed' ? 0 : newState === 'open' ? 1 : 2;
+    circuitBreakerState.set({ librarian: this.config.name }, stateValue);
+
+    // Record trips when opening
+    if (newState === 'open' && oldState !== 'open') {
+      circuitBreakerTrips.inc({
+        librarian: this.config.name,
+        reason: oldState === 'half-open' ? 'half_open_failure' : 'threshold_exceeded',
+      });
+    }
+
     switch (newState) {
       case 'open':
         this.state.nextAttemptTime = Date.now() + this.config.timeout;
         break;
-        
+
       case 'half-open':
         this.halfOpenSuccesses = 0;
         break;
-        
+
       case 'closed':
         this.state.failures = 0;
         this.state.successes = 0;
@@ -259,7 +283,7 @@ export class CircuitBreaker extends EventEmitter {
    */
   private cleanupOldRequests(): void {
     const cutoff = Date.now() - this.config.windowSize;
-    this.requestCounts = this.requestCounts.filter(req => req.timestamp > cutoff);
+    this.requestCounts = this.requestCounts.filter((req) => req.timestamp > cutoff);
   }
 
   /**
@@ -274,7 +298,7 @@ export class CircuitBreaker extends EventEmitter {
         details: {
           retryAfter: this.state.nextAttemptTime,
         },
-      }
+      },
     };
   }
 
@@ -311,8 +335,8 @@ export class CircuitBreaker extends EventEmitter {
  * Factory function to create circuit breakers with default configs
  */
 export function createCircuitBreaker(
-  name: string, 
-  config?: Partial<CircuitBreakerConfig>
+  name: string,
+  config?: Partial<CircuitBreakerConfig>,
 ): CircuitBreaker {
   return new CircuitBreaker({
     name,

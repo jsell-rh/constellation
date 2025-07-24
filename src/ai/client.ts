@@ -15,6 +15,7 @@ import { OpenAIProvider } from './providers/openai';
 import { AnthropicProvider } from './providers/anthropic';
 import { VertexAIProvider } from './providers/vertex-ai';
 import { GeminiProvider } from './providers/gemini';
+import { MetricsAIProvider } from './metrics-wrapper';
 import pino from 'pino';
 
 const logger = pino({
@@ -68,8 +69,8 @@ export class ConstellationAIClient implements AIClient {
           });
 
           if (provider.isAvailable()) {
-            this.providers.openai = provider; // Still register as 'openai' for compatibility
-            logger.debug('Gemini provider initialized (via OpenAI configuration)');
+            this.providers.openai = new MetricsAIProvider(provider); // Still register as 'openai' for compatibility
+            logger.debug('Gemini provider initialized (via OpenAI configuration) with metrics');
           }
         } else {
           // Use standard OpenAI provider
@@ -86,8 +87,8 @@ export class ConstellationAIClient implements AIClient {
           });
 
           if (provider.isAvailable()) {
-            this.providers.openai = provider;
-            logger.debug('OpenAI provider initialized');
+            this.providers.openai = new MetricsAIProvider(provider);
+            logger.debug('OpenAI provider initialized with metrics');
           }
         }
       } catch (error) {
@@ -110,7 +111,7 @@ export class ConstellationAIClient implements AIClient {
         });
 
         if (provider.isAvailable()) {
-          this.providers.anthropic = provider;
+          this.providers.anthropic = new MetricsAIProvider(provider);
           logger.debug('Anthropic provider initialized');
         }
       } catch (error) {
@@ -137,7 +138,7 @@ export class ConstellationAIClient implements AIClient {
         });
 
         if (provider.isAvailable()) {
-          this.providers['vertex-ai'] = provider;
+          this.providers['vertex-ai'] = new MetricsAIProvider(provider);
           logger.debug('Vertex AI provider initialized');
         }
       } catch (error) {

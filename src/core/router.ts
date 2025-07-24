@@ -6,7 +6,16 @@
 import { LibrarianExecutor } from './executor';
 import type { Librarian, Context, Response, LibrarianInfo } from '../types/core';
 import { errorResponse } from '../types/librarian-factory';
-import { withSpan, SpanAttributes, SpanNames } from '../observability';
+import {
+  withSpan,
+  SpanAttributes,
+  SpanNames,
+  queryCounter,
+  activeQueries,
+  recordQuery,
+  recordQueryDuration,
+  recordResponseMetrics,
+} from '../observability';
 import pino from 'pino';
 
 const logger = pino({
@@ -52,6 +61,11 @@ export class SimpleRouter {
    * Route a query to a specific librarian
    */
   async route(query: string, librarianId: string, context: Context = {}): Promise<Response> {
+    // Record query metrics
+    recordQuery();
+    activeQueries.inc({ librarian: librarianId });
+    const startTime = Date.now();
+
     return withSpan(SpanNames.QUERY_ROUTING, async (span) => {
       // Add span attributes
       span.setAttributes({
@@ -115,7 +129,35 @@ export class SimpleRouter {
         span.setAttribute(SpanAttributes.RESPONSE_SOURCE_COUNT, response.sources.length);
       }
 
+      // Record completion metrics
+      const duration = (Date.now() - startTime) / 1000; // Convert to seconds
+      const status = response.error ? 'error' : 'success';
+
+      queryCounter.inc({
+        librarian: librarianId,
+        status,
+        error_code: response.error?.code || 'none',
+      });
+
+      recordQueryDuration(duration, { librarian: librarianId, status });
+      recordResponseMetrics(response, librarianId);
+
+      activeQueries.dec({ librarian: librarianId });
+
       return response;
+    }).catch((error) => {
+      // Handle any unexpected errors
+      activeQueries.dec({ librarian: librarianId });
+
+      const duration = (Date.now() - startTime) / 1000;
+      queryCounter.inc({
+        librarian: librarianId,
+        status: 'error',
+        error_code: 'UNEXPECTED_ERROR',
+      });
+      recordQueryDuration(duration, { librarian: librarianId, status: 'error' });
+
+      throw error;
     });
   }
 
