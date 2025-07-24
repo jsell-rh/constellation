@@ -52,7 +52,7 @@ export class ConstellationMCPServer {
     // Instead, we create new instances for each request
 
     // Initialize delegation engine
-    this.delegationEngine = new DelegationEngine(router);
+    this.delegationEngine = new DelegationEngine(router, { enableParallelRouting: true });
   }
 
   /**

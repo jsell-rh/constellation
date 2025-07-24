@@ -13,17 +13,17 @@ describe('ResponseAggregator', () => {
   describe('BestConfidenceAggregator', () => {
     const aggregator = new ResponseAggregator(new BestConfidenceAggregator());
 
-    it('should return single response unchanged', () => {
+    it('should return single response unchanged', async () => {
       const response: Response = {
         answer: 'Single answer',
         confidence: 0.8,
       };
 
-      const result = aggregator.aggregate([response]);
+      const result = await aggregator.aggregate([response]);
       expect(result).toEqual(response);
     });
 
-    it('should select response with highest confidence', () => {
+    it('should select response with highest confidence', async () => {
       const responses: Response[] = [
         {
           answer: 'Low confidence answer',
@@ -42,7 +42,7 @@ describe('ResponseAggregator', () => {
         },
       ];
 
-      const result = aggregator.aggregate(responses);
+      const result = await aggregator.aggregate(responses);
 
       expect(result.answer).toBe('High confidence answer');
       expect(result.confidence).toBe(0.9);
@@ -50,7 +50,7 @@ describe('ResponseAggregator', () => {
       expect(result.metadata?.selectedLibrarian).toBe('high-conf');
     });
 
-    it('should handle responses without confidence scores', () => {
+    it('should handle responses without confidence scores', async () => {
       const responses: Response[] = [
         {
           answer: 'No confidence',
@@ -63,13 +63,13 @@ describe('ResponseAggregator', () => {
         },
       ];
 
-      const result = aggregator.aggregate(responses);
+      const result = await aggregator.aggregate(responses);
 
       expect(result.answer).toBe('Has confidence');
       expect(result.confidence).toBe(0.5);
     });
 
-    it('should merge sources from all responses', () => {
+    it('should merge sources from all responses', async () => {
       const responses: Response[] = [
         {
           answer: 'Answer 1',
@@ -89,7 +89,7 @@ describe('ResponseAggregator', () => {
         },
       ];
 
-      const result = aggregator.aggregate(responses);
+      const result = await aggregator.aggregate(responses);
 
       expect(result.sources).toHaveLength(3);
       expect(result.sources?.map((s) => s.name)).toContain('Source 1');
@@ -97,7 +97,7 @@ describe('ResponseAggregator', () => {
       expect(result.sources?.map((s) => s.name)).toContain('Source 3');
     });
 
-    it('should handle all error responses', () => {
+    it('should handle all error responses', async () => {
       const responses: Response[] = [
         {
           error: {
@@ -113,13 +113,13 @@ describe('ResponseAggregator', () => {
         },
       ];
 
-      const result = aggregator.aggregate(responses);
+      const result = await aggregator.aggregate(responses);
 
       expect(result.error).toBeDefined();
       expect(result.error?.code).toBe('ERROR_1');
     });
 
-    it('should filter out error responses during aggregation', () => {
+    it('should filter out error responses during aggregation', async () => {
       const responses: Response[] = [
         {
           answer: 'Good answer',
@@ -135,13 +135,13 @@ describe('ResponseAggregator', () => {
         },
       ];
 
-      const result = aggregator.aggregate(responses);
+      const result = await aggregator.aggregate(responses);
 
       expect(result.answer).toBe('Good answer');
       expect(result.error).toBeUndefined();
     });
 
-    it('should include aggregation metadata', () => {
+    it('should include aggregation metadata', async () => {
       const responses: Response[] = [
         {
           answer: 'Answer 1',
@@ -155,7 +155,7 @@ describe('ResponseAggregator', () => {
         },
       ];
 
-      const result = aggregator.aggregate(responses);
+      const result = await aggregator.aggregate(responses);
 
       const aggMeta = result.metadata?.aggregation as any;
       expect(aggMeta).toBeDefined();
@@ -172,7 +172,7 @@ describe('ResponseAggregator', () => {
   describe('CombineAnswersAggregator', () => {
     const aggregator = new ResponseAggregator(new CombineAnswersAggregator());
 
-    it('should combine answers from multiple responses', () => {
+    it('should combine answers from multiple responses', async () => {
       const responses: Response[] = [
         {
           answer: 'First perspective on the topic',
@@ -186,14 +186,14 @@ describe('ResponseAggregator', () => {
         },
       ];
 
-      const result = aggregator.aggregate(responses);
+      const result = await aggregator.aggregate(responses);
 
       expect(result.answer).toContain('**Expert A**: First perspective on the topic');
       expect(result.answer).toContain('**Expert B**: Second perspective on the topic');
       expect(result.confidence).toBe(0.75); // Average
     });
 
-    it('should combine sources from all responses', () => {
+    it('should combine sources from all responses', async () => {
       const responses: Response[] = [
         {
           answer: 'Answer 1',
@@ -207,14 +207,14 @@ describe('ResponseAggregator', () => {
         },
       ];
 
-      const result = aggregator.aggregate(responses);
+      const result = await aggregator.aggregate(responses);
 
       expect(result.sources).toHaveLength(2);
       expect(result.sources?.map((s) => s.name)).toContain('Source A');
       expect(result.sources?.map((s) => s.name)).toContain('Source B');
     });
 
-    it('should handle missing librarian names', () => {
+    it('should handle missing librarian names', async () => {
       const responses: Response[] = [
         {
           answer: 'Anonymous answer',
@@ -227,7 +227,7 @@ describe('ResponseAggregator', () => {
         },
       ];
 
-      const result = aggregator.aggregate(responses);
+      const result = await aggregator.aggregate(responses);
 
       expect(result.answer).toContain('**Unknown**: Anonymous answer');
       expect(result.answer).toContain('**Named**: Another answer');
@@ -237,20 +237,20 @@ describe('ResponseAggregator', () => {
   describe('Edge cases', () => {
     const aggregator = new ResponseAggregator();
 
-    it('should handle empty response array', () => {
-      const result = aggregator.aggregate([]);
+    it('should handle empty response array', async () => {
+      const result = await aggregator.aggregate([]);
 
       expect(result.error).toBeDefined();
       expect(result.error?.code).toBe('NO_RESPONSES');
     });
 
-    it('should handle responses with only partial fields', () => {
+    it('should handle responses with only partial fields', async () => {
       const responses: Response[] = [
-        { partial: true }, // No answer or error
+        {} as Response, // Empty response object
         { answer: 'Complete answer', confidence: 0.8 },
       ];
 
-      const result = aggregator.aggregate(responses);
+      const result = await aggregator.aggregate(responses);
 
       expect(result.answer).toBe('Complete answer');
     });

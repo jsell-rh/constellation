@@ -9,7 +9,12 @@ import type { AIClient } from '../ai/interface';
 import { errorResponse } from '../types/librarian-factory';
 import { AIQueryAnalyzer } from './ai-analyzer';
 import { DelegationExecutor } from './executor';
-import { ResponseAggregator, BestConfidenceAggregator } from './aggregator';
+import {
+  ResponseAggregator,
+  BestConfidenceAggregator,
+  CombineAnswersAggregator,
+  AIAggregator,
+} from './aggregator';
 import { getAIClient } from '../ai/client';
 import pino from 'pino';
 
@@ -27,6 +32,12 @@ export interface DelegationEngineOptions {
   aiClient?: AIClient;
   enableParallelRouting?: boolean;
   maxParallelQueries?: number;
+  aggregationStrategy?: 'best-confidence' | 'combine-answers' | 'ai-powered';
+  aggregationOptions?: {
+    preserveAttribution?: boolean;
+    includeConfidence?: boolean;
+    customPrompt?: string;
+  };
 }
 
 /**
@@ -45,13 +56,13 @@ export class DelegationEngine {
     options: DelegationEngineOptions = {},
   ) {
     this.executor = new DelegationExecutor(router);
-    this.aggregator = new ResponseAggregator(new BestConfidenceAggregator());
     this.enableParallelRouting = options.enableParallelRouting ?? false;
     this.maxParallelQueries = options.maxParallelQueries ?? 3;
 
     // Try to use provided AI client first, then fall back to global client
+    let aiClient: AIClient | undefined;
     try {
-      const aiClient = options.aiClient || getAIClient();
+      aiClient = options.aiClient || getAIClient();
       if (aiClient.defaultProvider.isAvailable()) {
         this.aiAnalyzer = new AIQueryAnalyzer(aiClient);
         logger.info('Delegation engine initialized with AI support');
@@ -60,6 +71,31 @@ export class DelegationEngine {
       }
     } catch (error) {
       logger.warn({ error }, 'Failed to initialize AI analyzer, using simple routing');
+    }
+
+    // Initialize aggregator based on strategy
+    const strategy = options.aggregationStrategy || 'best-confidence';
+    switch (strategy) {
+      case 'ai-powered':
+        if (!aiClient) {
+          logger.warn(
+            'AI aggregation requested but AI client not available, falling back to best-confidence',
+          );
+          this.aggregator = new ResponseAggregator(new BestConfidenceAggregator());
+        } else {
+          this.aggregator = new ResponseAggregator(
+            new AIAggregator(aiClient, options.aggregationOptions),
+          );
+          logger.info('Using AI-powered response aggregation');
+        }
+        break;
+      case 'combine-answers':
+        this.aggregator = new ResponseAggregator(new CombineAnswersAggregator());
+        break;
+      case 'best-confidence':
+      default:
+        this.aggregator = new ResponseAggregator(new BestConfidenceAggregator());
+        break;
     }
   }
 
@@ -180,7 +216,7 @@ export class DelegationEngine {
         'Received responses from multiple librarians',
       );
 
-      response = this.aggregator.aggregate(responses);
+      response = await this.aggregator.aggregate(responses);
     }
 
     // Add delegation metadata
