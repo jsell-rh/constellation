@@ -5,11 +5,9 @@
 
 import { CircuitBreaker, CircuitBreakerConfig } from './circuit-breaker';
 import { EventEmitter } from 'events';
-import pino from 'pino';
+import { createLogger } from '../observability/logger';
 
-const logger = pino({
-  level: process.env.LOG_LEVEL ?? 'info',
-});
+const logger = createLogger('circuit-breaker-manager');
 
 export interface CircuitBreakerManagerConfig {
   /** Default configuration for all circuit breakers */
@@ -51,51 +49,44 @@ export class CircuitBreakerManager extends EventEmitter {
 
       // Forward events from individual breakers
       breaker.on('stateChange', (event) => {
-        logger.info(
-          {
-            circuitBreaker: librarianId,
-            ...event,
-          },
-          'Circuit breaker state changed',
-        );
+        logger.info('Circuit breaker state changed', {
+          circuitBreakerId: librarianId,
+          fromState: event.from,
+          toState: event.to,
+          reason: event.reason,
+        });
 
         this.emit('stateChange', event);
       });
 
       breaker.on('rejected', (event) => {
-        logger.warn(
-          {
-            circuitBreaker: librarianId,
-            ...event,
-          },
-          'Request rejected by circuit breaker',
-        );
+        logger.warn('Request rejected by circuit breaker', {
+          circuitBreakerId: librarianId,
+          state: event.state,
+          errorCode: 'CIRCUIT_BREAKER_OPEN',
+          errorType: 'resilience',
+          recoverable: true,
+        });
 
         this.emit('rejected', event);
       });
 
       breaker.on('failure', (event: { duration?: number; state?: string }) => {
-        logger.debug(
-          {
-            circuitBreaker: librarianId,
-            duration: event.duration,
-            state: event.state,
-          },
-          'Request failed',
-        );
+        logger.debug('Request failed in circuit breaker', {
+          circuitBreakerId: librarianId,
+          durationMs: event.duration,
+          state: event.state,
+        });
 
         this.emit('failure', event);
       });
 
       breaker.on('success', (event: { duration?: number; state?: string }) => {
-        logger.debug(
-          {
-            circuitBreaker: librarianId,
-            duration: event.duration,
-            state: event.state,
-          },
-          'Request succeeded',
-        );
+        logger.debug('Request succeeded in circuit breaker', {
+          circuitBreakerId: librarianId,
+          durationMs: event.duration,
+          state: event.state,
+        });
 
         this.emit('success', event);
       });
@@ -151,7 +142,10 @@ export class CircuitBreakerManager extends EventEmitter {
     const breaker = this.breakers.get(librarianId);
     if (breaker) {
       breaker.close();
-      logger.info({ librarianId }, 'Circuit breaker manually closed');
+      logger.info('Circuit breaker manually closed', {
+        librarianId,
+        action: 'manual_close',
+      });
     }
   }
 
@@ -162,7 +156,13 @@ export class CircuitBreakerManager extends EventEmitter {
     const breaker = this.breakers.get(librarianId);
     if (breaker) {
       breaker.open();
-      logger.warn({ librarianId }, 'Circuit breaker manually opened');
+      logger.warn('Circuit breaker manually opened', {
+        librarianId,
+        action: 'manual_open',
+        errorCode: 'MANUAL_CIRCUIT_BREAK',
+        errorType: 'resilience',
+        recoverable: true,
+      });
     }
   }
 
@@ -173,7 +173,10 @@ export class CircuitBreakerManager extends EventEmitter {
     for (const [, breaker] of this.breakers) {
       breaker.close();
     }
-    logger.info('All circuit breakers reset');
+    logger.info('All circuit breakers reset', {
+      breakerCount: this.breakers.size,
+      action: 'reset_all',
+    });
   }
 
   /**

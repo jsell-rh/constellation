@@ -10,6 +10,9 @@ import type {
   AIStreamResponse,
   AICompletionOptions,
 } from '../interface';
+import { createLogger } from '../../observability/logger';
+
+const logger = createLogger('gemini-provider');
 
 export interface GeminiProviderConfig {
   apiKey: string;
@@ -34,11 +37,17 @@ export class GeminiProvider implements AIProvider {
     };
 
     // Log configuration for debugging
-    console.log('Gemini Provider Config:', {
-      model: this.config.model,
-      baseURL: this.config.baseURL,
-      hasApiKey: !!config.apiKey,
-    });
+    logger.info(
+      {
+        provider: 'gemini',
+        model: this.config.model,
+        baseURL: this.config.baseURL,
+        hasApiKey: !!config.apiKey,
+        temperature: this.config.temperature,
+        maxTokens: this.config.maxTokens,
+      },
+      'Gemini provider initialized',
+    );
 
     this.client = new OpenAI({
       apiKey: config.apiKey,
@@ -61,7 +70,14 @@ export class GeminiProvider implements AIProvider {
       // Testing shows that Gemini needs at least 1500 tokens for complex prompts
       // and returns empty responses when the limit is too low
       if (maxTokens !== undefined && maxTokens < 1500) {
-        console.warn(`Gemini: max_tokens ${maxTokens} is too small, using minimum of 1500`);
+        logger.warn(
+          {
+            requestedMaxTokens: maxTokens,
+            adjustedMaxTokens: 1500,
+            reason: 'gemini_minimum_requirement',
+          },
+          'Adjusting max_tokens to Gemini minimum requirement',
+        );
         maxTokens = 1500;
       }
 
@@ -94,11 +110,18 @@ export class GeminiProvider implements AIProvider {
         finish_reason: choice.finish_reason || undefined,
       };
     } catch (error: any) {
-      console.error('Gemini Provider Error:', {
-        message: error.message,
-        status: error.status,
-        error: error.error,
-      });
+      logger.error(
+        {
+          err: error,
+          errorCode: 'GEMINI_COMPLETION_FAILED',
+          errorType: 'API_ERROR',
+          status: error.status,
+          errorDetails: error.error,
+          model: this.config.model,
+          recoverable: error.status >= 500 || error.status === 429,
+        },
+        'Gemini completion failed',
+      );
 
       throw new Error(
         `Gemini completion failed: ${error instanceof Error ? error.message : String(error)}`,
@@ -119,7 +142,15 @@ export class GeminiProvider implements AIProvider {
     // Gemini has issues with small max_tokens values
     // Testing shows that Gemini needs at least 1500 tokens for complex prompts
     if (maxTokens !== undefined && maxTokens < 1500) {
-      console.warn(`Gemini: max_tokens ${maxTokens} is too small, using minimum of 1500`);
+      logger.warn(
+        {
+          requestedMaxTokens: maxTokens,
+          adjustedMaxTokens: 1500,
+          reason: 'gemini_minimum_requirement',
+          mode: 'streaming',
+        },
+        'Adjusting max_tokens to Gemini minimum requirement',
+      );
       maxTokens = 1500;
     }
 

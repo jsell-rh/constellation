@@ -5,11 +5,9 @@
 import type { Response } from '../types/core';
 import type { AIClient } from '../ai/interface';
 import { getPromptLoader } from '../prompts/loader';
-import pino from 'pino';
+import { createLogger } from '../observability/logger';
 
-const logger = pino({
-  level: process.env.LOG_LEVEL ?? 'info',
-});
+const logger = createLogger('aggregator');
 
 export interface AggregationStrategy {
   aggregate(
@@ -76,15 +74,13 @@ export class BestConfidenceAggregator implements AggregationStrategy {
     const allSources = this.mergeSources(validResponses);
     const metadata = this.mergeMetadata(validResponses);
 
-    logger.info(
-      {
-        selectedLibrarian: metadata.selectedLibrarian,
-        confidence: best.confidence,
-        totalResponses: responses.length,
-        validResponses: validResponses.length,
-      },
-      'Aggregated responses using best confidence',
-    );
+    logger.info('Aggregated responses using best confidence', {
+      selectedLibrarian: metadata.selectedLibrarian,
+      confidence: best.confidence,
+      totalResponses: responses.length,
+      validResponses: validResponses.length,
+      strategy: 'best-confidence',
+    });
 
     const result: Response = {
       ...best,
@@ -317,18 +313,20 @@ export class AIAggregator implements AggregationStrategy {
         max_tokens: 1000,
       });
 
-      logger.debug(
-        {
-          promptLength: prompt.length,
-          responseLength: combinedAnswer.length,
-          response: combinedAnswer.substring(0, 100),
-        },
-        'AI aggregation response received',
-      );
+      logger.debug('AI aggregation response received', {
+        promptLength: prompt.length,
+        responseLength: combinedAnswer.length,
+        responsePreview: combinedAnswer.substring(0, 100) + '...',
+      });
 
       // Validate AI response
       if (!combinedAnswer || combinedAnswer.trim().length === 0) {
-        logger.warn('AI returned empty response, falling back to best confidence');
+        logger.warn('AI returned empty response, falling back to best confidence', {
+          errorCode: 'AI_EMPTY_RESPONSE',
+          errorType: 'ai',
+          recoverable: true,
+          fallbackStrategy: 'best-confidence',
+        });
         const fallbackAggregator = new BestConfidenceAggregator();
         return fallbackAggregator.aggregate(responses);
       }
@@ -341,15 +339,13 @@ export class AIAggregator implements AggregationStrategy {
         validResponses.reduce((sum, r) => sum + (r.confidence ?? 0), 0) / validResponses.length;
       const maxConfidence = Math.max(...validResponses.map((r) => r.confidence ?? 0));
 
-      logger.info(
-        {
-          totalResponses: responses.length,
-          validResponses: validResponses.length,
-          avgConfidence,
-          maxConfidence,
-        },
-        'AI aggregation completed',
-      );
+      logger.info('AI aggregation completed', {
+        totalResponses: responses.length,
+        validResponses: validResponses.length,
+        avgConfidence,
+        maxConfidence,
+        strategy: 'ai-powered',
+      });
 
       const result: Response = {
         answer: combinedAnswer,
@@ -375,7 +371,13 @@ export class AIAggregator implements AggregationStrategy {
 
       return result;
     } catch (error) {
-      logger.error({ error }, 'AI aggregation failed, falling back to best confidence');
+      logger.error('AI aggregation failed, falling back to best confidence', {
+        err: error,
+        errorCode: 'AI_AGGREGATION_ERROR',
+        errorType: 'ai',
+        recoverable: true,
+        fallbackStrategy: 'best-confidence',
+      });
 
       // Fallback to best confidence aggregation
       const fallbackAggregator = new BestConfidenceAggregator();

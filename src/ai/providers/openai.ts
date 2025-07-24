@@ -11,6 +11,9 @@ import type {
   AIStreamResponse,
   AICompletionOptions,
 } from '../interface';
+import { createLogger } from '../../observability/logger';
+
+const logger = createLogger('openai-provider');
 
 export interface OpenAIProviderConfig {
   apiKey: string;
@@ -34,11 +37,17 @@ export class OpenAIProvider implements AIProvider {
     };
 
     // Log configuration for debugging
-    console.log('OpenAI Provider Config:', {
-      model: this.config.model,
-      baseURL: this.config.baseURL,
-      hasApiKey: !!config.apiKey,
-    });
+    logger.info(
+      {
+        provider: 'openai',
+        model: this.config.model,
+        baseURL: this.config.baseURL,
+        hasApiKey: !!config.apiKey,
+        temperature: this.config.temperature,
+        maxTokens: this.config.maxTokens,
+      },
+      'OpenAI provider initialized',
+    );
 
     // Check if this is Gemini
     const isGemini = config.baseURL?.includes('generativelanguage.googleapis.com');
@@ -48,7 +57,14 @@ export class OpenAIProvider implements AIProvider {
 
     if (isGemini) {
       // For Gemini, use a configuration that avoids problematic defaults
-      console.log('Using Gemini-compatible configuration');
+      logger.info(
+        {
+          mode: 'gemini-compatibility',
+          baseURL: config.baseURL,
+          model: modelName,
+        },
+        'Using Gemini-compatible configuration',
+      );
 
       // Create ChatOpenAI with Gemini-safe configuration
       this.llm = new ChatOpenAI({
@@ -121,17 +137,19 @@ export class OpenAIProvider implements AIProvider {
 
     // Debug log for Gemini
     if (this.config.baseURL?.includes('generativelanguage.googleapis.com')) {
-      console.log('Gemini Request:', {
-        messageCount: langchainMessages.length,
-        firstMessage:
-          typeof langchainMessages[0]?.content === 'string'
-            ? langchainMessages[0].content.substring(0, 100) + '...'
-            : 'Complex content',
-        options: {
-          max_tokens: options.max_tokens,
+      logger.debug(
+        {
+          provider: 'gemini',
+          messageCount: langchainMessages.length,
+          firstMessagePreview:
+            typeof langchainMessages[0]?.content === 'string'
+              ? langchainMessages[0].content.substring(0, 100) + '...'
+              : 'Complex content',
+          maxTokens: options.max_tokens,
           temperature: options.temperature,
         },
-      });
+        'Sending request to Gemini',
+      );
     }
 
     // Apply options to the LLM instance
@@ -173,17 +191,23 @@ export class OpenAIProvider implements AIProvider {
       };
     } catch (error: any) {
       // Log detailed error information for debugging
-      console.error('OpenAI Provider Error Details:', {
-        message: error.message,
-        status: error.response?.status,
-        statusText: error.response?.statusText,
-        data: error.response?.data,
-        config: {
-          baseURL: this.config.baseURL,
+      logger.error(
+        {
+          err: error,
+          errorCode: 'OPENAI_COMPLETION_FAILED',
+          errorType: 'API_ERROR',
+          status: error.response?.status,
+          statusText: error.response?.statusText,
+          errorDetails: error.response?.data,
+          provider: this.config.baseURL?.includes('generativelanguage.googleapis.com')
+            ? 'gemini'
+            : 'openai',
           model: this.config.model,
-          apiKey: this.config.apiKey ? '***' : 'not set',
+          hasApiKey: !!this.config.apiKey,
+          recoverable: error.response?.status >= 500 || error.response?.status === 429,
         },
-      });
+        'AI provider completion failed',
+      );
 
       throw new Error(
         `OpenAI completion failed: ${error instanceof Error ? error.message : String(error)}`,

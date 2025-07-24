@@ -4,12 +4,10 @@
  */
 
 import ValkeyClient, { Redis, Cluster } from 'iovalkey';
-import pino from 'pino';
+import { createLogger } from '../observability/logger';
 import type { Cache, CacheConfig, CacheOptions, CacheMetrics } from './interface';
 
-const logger = pino({
-  level: process.env.LOG_LEVEL ?? 'info',
-});
+const logger = createLogger('valkey-adapter');
 
 type ValkeyClientType = Redis | Cluster;
 
@@ -37,9 +35,18 @@ export class ValkeyAdapter implements Cache {
   async connect(): Promise<void> {
     try {
       await this.client.connect();
-      logger.info({ url: this.config.url }, 'Connected to Valkey');
+      logger.info('Connected to Valkey', {
+        url: this.config.url,
+        adapter: 'valkey',
+      });
     } catch (error) {
-      logger.error({ error, url: this.config.url }, 'Failed to connect to Valkey');
+      logger.error('Failed to connect to Valkey', {
+        err: error,
+        url: this.config.url,
+        errorCode: 'VALKEY_CONNECTION_FAILED',
+        errorType: 'infrastructure',
+        recoverable: true,
+      });
       throw error;
     }
   }
@@ -64,7 +71,14 @@ export class ValkeyAdapter implements Cache {
       return this.deserialize<T>(value);
     } catch (error) {
       this.metrics.errors++;
-      logger.error({ error, key }, 'Cache get error');
+      logger.error('Cache get error', {
+        err: error,
+        key,
+        operation: 'get',
+        errorCode: 'CACHE_GET_ERROR',
+        errorType: 'cache',
+        recoverable: true,
+      });
       return null; // Fail gracefully
     }
   }
@@ -96,7 +110,14 @@ export class ValkeyAdapter implements Cache {
       this.metrics.sets++;
     } catch (error) {
       this.metrics.errors++;
-      logger.error({ error, key }, 'Cache set error');
+      logger.error('Cache set error', {
+        err: error,
+        key,
+        operation: 'set',
+        errorCode: 'CACHE_SET_ERROR',
+        errorType: 'cache',
+        recoverable: false,
+      });
       throw error; // Don't fail silently for sets
     }
   }
@@ -111,7 +132,14 @@ export class ValkeyAdapter implements Cache {
       return result > 0;
     } catch (error) {
       this.metrics.errors++;
-      logger.error({ error, key }, 'Cache delete error');
+      logger.error('Cache delete error', {
+        err: error,
+        key,
+        operation: 'delete',
+        errorCode: 'CACHE_DELETE_ERROR',
+        errorType: 'cache',
+        recoverable: true,
+      });
       return false;
     }
   }
@@ -125,7 +153,14 @@ export class ValkeyAdapter implements Cache {
       return result === 1;
     } catch (error) {
       this.metrics.errors++;
-      logger.error({ error, key }, 'Cache exists error');
+      logger.error('Cache exists error', {
+        err: error,
+        key,
+        operation: 'exists',
+        errorCode: 'CACHE_EXISTS_ERROR',
+        errorType: 'cache',
+        recoverable: true,
+      });
       return false;
     }
   }
@@ -142,10 +177,19 @@ export class ValkeyAdapter implements Cache {
         await this.client.del(...keys);
       }
 
-      logger.info({ keysDeleted: keys.length }, 'Cache cleared');
+      logger.info('Cache cleared', {
+        keysDeleted: keys.length,
+        operation: 'clear',
+      });
     } catch (error) {
       this.metrics.errors++;
-      logger.error({ error }, 'Cache clear error');
+      logger.error('Cache clear error', {
+        err: error,
+        operation: 'clear',
+        errorCode: 'CACHE_CLEAR_ERROR',
+        errorType: 'cache',
+        recoverable: false,
+      });
       throw error;
     }
   }
@@ -171,13 +215,24 @@ export class ValkeyAdapter implements Cache {
       }
 
       if (totalInvalidated > 0) {
-        logger.info({ tags, invalidated: totalInvalidated }, 'Cache invalidated by tags');
+        logger.info('Cache invalidated by tags', {
+          tags,
+          keysInvalidated: totalInvalidated,
+          operation: 'invalidate_by_tags',
+        });
       }
 
       return totalInvalidated;
     } catch (error) {
       this.metrics.errors++;
-      logger.error({ error, tags }, 'Cache tag invalidation error');
+      logger.error('Cache tag invalidation error', {
+        err: error,
+        tags,
+        operation: 'invalidate_by_tags',
+        errorCode: 'CACHE_TAG_INVALIDATION_ERROR',
+        errorType: 'cache',
+        recoverable: true,
+      });
       return 0;
     }
   }
@@ -195,9 +250,16 @@ export class ValkeyAdapter implements Cache {
   async close(): Promise<void> {
     try {
       await this.client.quit();
-      logger.info('Valkey connection closed');
+      logger.info('Valkey connection closed', {
+        adapter: 'valkey',
+      });
     } catch (error) {
-      logger.error({ error }, 'Error closing Valkey connection');
+      logger.error('Error closing Valkey connection', {
+        err: error,
+        errorCode: 'VALKEY_CLOSE_ERROR',
+        errorType: 'infrastructure',
+        recoverable: true,
+      });
     }
   }
 
@@ -232,7 +294,13 @@ export class ValkeyAdapter implements Cache {
       }
       return JSON.stringify(value);
     } catch (error) {
-      logger.error({ error, value }, 'Serialization error');
+      logger.error('Serialization error', {
+        err: error,
+        valueType: typeof value,
+        errorCode: 'CACHE_SERIALIZATION_ERROR',
+        errorType: 'data',
+        recoverable: false,
+      });
       throw new Error('Failed to serialize cache value');
     }
   }

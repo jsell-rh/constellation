@@ -16,11 +16,9 @@ import {
   recordError,
   timeExecution,
 } from '../observability/metrics';
-import pino from 'pino';
+import { createLogger } from '../observability/logger';
 
-const logger = pino({
-  level: process.env.LOG_LEVEL ?? 'info',
-});
+const logger = createLogger('ai-metrics');
 
 /**
  * Wraps an AI provider to add metrics collection
@@ -72,14 +70,13 @@ export class MetricsAIProvider implements AIProvider {
           response.usage.completion_tokens,
         );
 
-        logger.debug(
-          {
-            provider: this.provider.name,
-            model: response.model,
-            usage: response.usage,
-          },
-          'AI request completed with token usage',
-        );
+        logger.debug('AI request completed with token usage', {
+          provider: this.provider.name,
+          model: response.model,
+          promptTokens: response.usage.prompt_tokens,
+          completionTokens: response.usage.completion_tokens,
+          totalTokens: response.usage.prompt_tokens + response.usage.completion_tokens,
+        });
       }
 
       return response;

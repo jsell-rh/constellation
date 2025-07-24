@@ -6,11 +6,9 @@
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 import * as api from '@opentelemetry/api';
-import pino from 'pino';
+import { createLogger } from './logger';
 
-const logger = pino({
-  level: process.env.LOG_LEVEL ?? 'info',
-});
+const logger = createLogger('tracing');
 
 // Global SDK instance
 let sdk: NodeSDK | null = null;
@@ -39,7 +37,9 @@ export function initializeTracing(config: TracingConfig = {}): void {
   } = config;
 
   if (!enabled) {
-    logger.info('Distributed tracing disabled');
+    logger.info('Distributed tracing disabled', {
+      enabled: false,
+    });
     return;
   }
 
@@ -67,25 +67,39 @@ export function initializeTracing(config: TracingConfig = {}): void {
     // Start the SDK
     sdk.start();
 
-    logger.info(
-      {
-        serviceName,
-        serviceVersion,
-        exporterUrl,
-        debug,
-      },
-      'OpenTelemetry distributed tracing initialized',
-    );
+    logger.info('OpenTelemetry distributed tracing initialized', {
+      serviceName,
+      serviceVersion,
+      exporterUrl,
+      debug,
+    });
 
     // Add process exit handler
     process.on('SIGTERM', () => {
       sdk
         ?.shutdown()
-        .then(() => logger.info('Tracing SDK shut down successfully'))
-        .catch((error) => logger.error({ error }, 'Error shutting down tracing SDK'));
+        .then(() =>
+          logger.info('Tracing SDK shut down successfully', {
+            trigger: 'SIGTERM',
+          }),
+        )
+        .catch((error) =>
+          logger.error('Error shutting down tracing SDK', {
+            err: error,
+            trigger: 'SIGTERM',
+            errorCode: 'TRACING_SHUTDOWN_ERROR',
+            errorType: 'infrastructure',
+            recoverable: true,
+          }),
+        );
     });
   } catch (error) {
-    logger.error({ error }, 'Failed to initialize OpenTelemetry tracing');
+    logger.error('Failed to initialize OpenTelemetry tracing', {
+      err: error,
+      errorCode: 'TRACING_INIT_ERROR',
+      errorType: 'infrastructure',
+      recoverable: false,
+    });
     throw error;
   }
 }
@@ -97,7 +111,9 @@ export async function shutdownTracing(): Promise<void> {
   if (sdk) {
     await sdk.shutdown();
     sdk = null;
-    logger.info('Tracing SDK shut down');
+    logger.info('Tracing SDK shut down', {
+      hadSdk: true,
+    });
   }
 }
 

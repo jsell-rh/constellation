@@ -5,11 +5,9 @@
 
 import * as api from '@opentelemetry/api';
 import { ulid } from 'ulid';
-import pino from 'pino';
+import { createLogger } from './logger';
 
-const logger = pino({
-  level: process.env.LOG_LEVEL ?? 'info',
-});
+const logger = createLogger('simple-tracing');
 
 // Custom simple tracer implementation
 class SimpleTracer implements api.Tracer {
@@ -23,38 +21,38 @@ class SimpleTracer implements api.Tracer {
     };
 
     const span = new SimpleSpan(name, spanContext);
-    
+
     // Log span start if in development
     if (process.env.NODE_ENV === 'development') {
-      logger.debug({
-        span: name,
+      logger.debug('Span started', {
+        spanName: name,
         traceId: spanContext.traceId,
         spanId: spanContext.spanId,
-        attributes: options?.attributes,
-      }, 'Span started');
+        hasAttributes: !!options?.attributes,
+      });
     }
 
     return span;
   }
 
-  startActiveSpan<F extends (span: api.Span) => unknown>(
-    name: string,
-    fn: F
-  ): ReturnType<F>;
+  startActiveSpan<F extends (span: api.Span) => unknown>(name: string, fn: F): ReturnType<F>;
   startActiveSpan<F extends (span: api.Span) => unknown>(
     name: string,
     options: api.SpanOptions,
-    fn: F
+    fn: F,
   ): ReturnType<F>;
   startActiveSpan<F extends (span: api.Span) => unknown>(
     name: string,
     options: api.SpanOptions,
     context: api.Context,
-    fn: F
+    fn: F,
   ): ReturnType<F>;
   startActiveSpan<F extends (span: api.Span) => unknown>(...args: unknown[]): ReturnType<F> {
     const [name, optionsOrFn, contextOrFn, maybeFn] = args;
-    const options = typeof optionsOrFn === 'object' && optionsOrFn !== null ? optionsOrFn as api.SpanOptions : {};
+    const options =
+      typeof optionsOrFn === 'object' && optionsOrFn !== null
+        ? (optionsOrFn as api.SpanOptions)
+        : {};
     const fn = (maybeFn || contextOrFn || optionsOrFn) as F;
     const span = this.startSpan(name as string, options);
     return fn(span) as ReturnType<F>;
@@ -113,21 +111,21 @@ class SimpleSpan implements api.Span {
 
   end(endTime?: number): void {
     if (this._endTime) return;
-    
+
     this._endTime = endTime || Date.now();
     const duration = this._endTime - this._startTime;
 
     // Log span completion if in development
     if (process.env.NODE_ENV === 'development') {
-      logger.debug({
-        span: this._name,
+      logger.debug('Span completed', {
+        spanName: this._name,
         traceId: this._spanContext.traceId,
         spanId: this._spanContext.spanId,
-        duration: `${duration}ms`,
+        durationMs: duration,
         status: this._status.code === api.SpanStatusCode.OK ? 'OK' : 'ERROR',
-        attributes: this._attributes,
-        events: this._events,
-      }, 'Span completed');
+        attributeCount: Object.keys(this._attributes).length,
+        eventCount: this._events.length,
+      });
     }
   }
 
@@ -138,11 +136,15 @@ class SimpleSpan implements api.Span {
   recordException(exception: api.Exception, time?: number): void {
     const errorName = exception instanceof Error ? exception.name : 'Error';
     const errorMessage = exception instanceof Error ? exception.message : String(exception);
-    
-    this.addEvent('exception', {
-      'exception.type': errorName,
-      'exception.message': errorMessage,
-    }, time);
+
+    this.addEvent(
+      'exception',
+      {
+        'exception.type': errorName,
+        'exception.message': errorMessage,
+      },
+      time,
+    );
   }
 }
 
@@ -152,22 +154,20 @@ let globalTracer: api.Tracer | null = null;
 /**
  * Initialize tracing (simplified version)
  */
-export function initializeTracing(config?: {
-  serviceName?: string;
-  enabled?: boolean;
-}): void {
-  const tracingEnabled = config?.enabled ?? 
-    process.env.TRACE_ENABLED === 'true' ?? 
-    false;
+export function initializeTracing(config?: { serviceName?: string; enabled?: boolean }): void {
+  const tracingEnabled = config?.enabled ?? process.env.TRACE_ENABLED === 'true' ?? false;
 
   if (!tracingEnabled) {
-    logger.info('Tracing disabled');
+    logger.info('Tracing disabled', {
+      enabled: false,
+    });
     return;
   }
 
-  logger.info({
+  logger.info('Simple tracing initialized', {
     serviceName: config?.serviceName ?? 'constellation',
-  }, 'Simple tracing initialized');
+    enabled: true,
+  });
 }
 
 /**
@@ -183,10 +183,7 @@ export function getTracer(name: string = 'constellation'): api.Tracer {
 /**
  * Create a new span with automatic error handling
  */
-export function createSpan(
-  name: string,
-  options?: api.SpanOptions
-): api.Span {
+export function createSpan(name: string, options?: api.SpanOptions): api.Span {
   const tracer = getTracer();
   return tracer.startSpan(name, options);
 }
@@ -197,10 +194,10 @@ export function createSpan(
 export async function withSpan<T>(
   name: string,
   fn: (span: api.Span) => Promise<T>,
-  options?: api.SpanOptions
+  options?: api.SpanOptions,
 ): Promise<T> {
   const span = createSpan(name, options);
-  
+
   try {
     const result = await fn(span);
     span.setStatus({ code: api.SpanStatusCode.OK });
@@ -210,11 +207,11 @@ export async function withSpan<T>(
       code: api.SpanStatusCode.ERROR,
       message: error instanceof Error ? error.message : 'Unknown error',
     });
-    
+
     if (error instanceof Error) {
       span.recordException(error);
     }
-    
+
     throw error;
   } finally {
     span.end();

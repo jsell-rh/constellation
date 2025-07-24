@@ -16,11 +16,9 @@ import { AnthropicProvider } from './providers/anthropic';
 import { VertexAIProvider } from './providers/vertex-ai';
 import { GeminiProvider } from './providers/gemini';
 import { MetricsAIProvider } from './metrics-wrapper';
-import pino from 'pino';
+import { createLogger } from '../observability/logger';
 
-const logger = pino({
-  level: process.env.LOG_LEVEL ?? 'info',
-});
+const logger = createLogger('ai-client');
 
 export class ConstellationAIClient implements AIClient {
   public defaultProvider: AIProvider;
@@ -38,13 +36,11 @@ export class ConstellationAIClient implements AIClient {
 
     this.defaultProvider = defaultProviderInstance;
 
-    logger.info(
-      {
-        defaultProvider: config.defaultProvider,
-        availableProviders: Object.keys(this.providers),
-      },
-      'AI Client initialized',
-    );
+    logger.info('AI Client initialized', {
+      defaultProvider: config.defaultProvider,
+      availableProviders: Object.keys(this.providers),
+      providerCount: Object.keys(this.providers).length,
+    });
   }
 
   private initializeProviders(): void {
@@ -70,7 +66,10 @@ export class ConstellationAIClient implements AIClient {
 
           if (provider.isAvailable()) {
             this.providers.openai = new MetricsAIProvider(provider); // Still register as 'openai' for compatibility
-            logger.debug('Gemini provider initialized (via OpenAI configuration) with metrics');
+            logger.debug('Gemini provider initialized via OpenAI configuration', {
+              provider: 'gemini',
+              hasMetrics: true,
+            });
           }
         } else {
           // Use standard OpenAI provider
@@ -88,11 +87,19 @@ export class ConstellationAIClient implements AIClient {
 
           if (provider.isAvailable()) {
             this.providers.openai = new MetricsAIProvider(provider);
-            logger.debug('OpenAI provider initialized with metrics');
+            logger.debug('OpenAI provider initialized', {
+              provider: 'openai',
+              hasMetrics: true,
+            });
           }
         }
       } catch (error) {
-        logger.warn({ error }, 'Failed to initialize OpenAI/Gemini provider');
+        logger.warn('Failed to initialize OpenAI/Gemini provider', {
+          err: error,
+          errorCode: 'AI_PROVIDER_INIT_ERROR',
+          errorType: 'configuration',
+          recoverable: true,
+        });
       }
     }
 
@@ -112,10 +119,18 @@ export class ConstellationAIClient implements AIClient {
 
         if (provider.isAvailable()) {
           this.providers.anthropic = new MetricsAIProvider(provider);
-          logger.debug('Anthropic provider initialized');
+          logger.debug('Anthropic provider initialized', {
+            provider: 'anthropic',
+            hasMetrics: true,
+          });
         }
       } catch (error) {
-        logger.warn({ error }, 'Failed to initialize Anthropic provider');
+        logger.warn('Failed to initialize Anthropic provider', {
+          err: error,
+          errorCode: 'AI_PROVIDER_INIT_ERROR',
+          errorType: 'configuration',
+          recoverable: true,
+        });
       }
     }
 
@@ -139,10 +154,18 @@ export class ConstellationAIClient implements AIClient {
 
         if (provider.isAvailable()) {
           this.providers['vertex-ai'] = new MetricsAIProvider(provider);
-          logger.debug('Vertex AI provider initialized');
+          logger.debug('Vertex AI provider initialized', {
+            provider: 'vertex-ai',
+            hasMetrics: true,
+          });
         }
       } catch (error) {
-        logger.warn({ error }, 'Failed to initialize Vertex AI provider');
+        logger.warn('Failed to initialize Vertex AI provider', {
+          err: error,
+          errorCode: 'AI_PROVIDER_INIT_ERROR',
+          errorType: 'configuration',
+          recoverable: true,
+        });
       }
     }
 

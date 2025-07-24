@@ -11,12 +11,10 @@ import { createLibrarian } from './types/librarian-factory';
 import { createAIClientFromEnv } from './ai/client';
 import { loadLibrarians } from './registry/secure-loader';
 import { initializeTracing, initializeMetricsEndpoint } from './observability';
+import { createLogger } from './observability/logger';
 import express from 'express';
-import pino from 'pino';
 
-const logger = pino({
-  level: process.env.LOG_LEVEL ?? 'info',
-});
+const logger = createLogger('main');
 
 // Export all public APIs
 export * from './types';
@@ -27,9 +25,14 @@ export * from './mcp';
  * Main function to start Constellation as MCP server
  */
 async function main(): Promise<void> {
-  logger.info('Starting Constellation MCP Server');
-
-  console.log('🚀 Starting Constellation...\n');
+  logger.info(
+    {
+      service: 'constellation',
+      version: process.env.npm_package_version || '0.1.0',
+      environment: process.env.NODE_ENV || 'development',
+    },
+    'Starting Constellation MCP Server',
+  );
 
   // Initialize OpenTelemetry tracing
   initializeTracing({
@@ -47,8 +50,14 @@ async function main(): Promise<void> {
 
     // Start the metrics server
     metricsApp.listen(metricsPort, () => {
-      logger.info({ port: metricsPort }, 'Prometheus metrics server started');
-      console.log(`📊 Metrics available at http://localhost:${metricsPort}/metrics`);
+      logger.info(
+        {
+          port: metricsPort,
+          endpoint: `/metrics`,
+          url: `http://localhost:${metricsPort}/metrics`,
+        },
+        'Prometheus metrics server started',
+      );
     });
   }
 
@@ -64,7 +73,15 @@ async function main(): Promise<void> {
       'AI client initialized',
     );
   } catch (error) {
-    logger.warn('No AI providers configured - librarians will run without AI capabilities');
+    logger.warn(
+      {
+        err: error,
+        errorCode: 'AI_CONFIG_MISSING',
+        errorType: 'CONFIGURATION_ERROR',
+        recoverable: true,
+      },
+      'No AI providers configured - librarians will run without AI capabilities',
+    );
   }
 
   // Create executor with AI client
@@ -87,10 +104,25 @@ async function main(): Promise<void> {
       router.setDefaultContext({ ai: aiClient });
     }
   } catch (error) {
-    logger.error({ error, path: registryPath }, 'Failed to load registry');
+    logger.error(
+      {
+        err: error,
+        path: registryPath,
+        errorCode: 'REGISTRY_LOAD_FAILED',
+        errorType: 'CONFIGURATION_ERROR',
+        recoverable: true,
+      },
+      'Failed to load registry',
+    );
 
     // Fallback: Register a minimal hello librarian
-    logger.warn('Registering fallback hello librarian');
+    logger.warn(
+      {
+        fallbackId: 'hello-fallback',
+        reason: 'registry_load_failed',
+      },
+      'Registering fallback hello librarian',
+    );
     const helloLibrarian = createLibrarian((_query) => {
       return Promise.resolve({
         answer:
@@ -115,7 +147,13 @@ async function main(): Promise<void> {
   }
 
   const librarianCount = router.getAllLibrarians().length;
-  logger.info(`Registered ${librarianCount} librarians`);
+  logger.info(
+    {
+      librarianCount,
+      librarians: router.getAllLibrarians(),
+    },
+    'Librarians registered successfully',
+  );
 
   // Start MCP server
   await runMCPServer(router);
@@ -124,7 +162,15 @@ async function main(): Promise<void> {
 // Run if called directly
 if (require.main === module) {
   main().catch((error: unknown) => {
-    logger.error({ error }, 'Failed to start Constellation');
+    logger.error(
+      {
+        err: error,
+        errorCode: 'STARTUP_FAILED',
+        errorType: 'FATAL_ERROR',
+        recoverable: false,
+      },
+      'Failed to start Constellation',
+    );
     process.exit(1);
   });
 }

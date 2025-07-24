@@ -6,20 +6,18 @@
 import jwt from 'jsonwebtoken';
 import type { Request, Response, NextFunction } from 'express';
 import type { User } from '../types/core';
-import pino from 'pino';
+import { createLogger } from '../observability/logger';
 
-const logger = pino({
-  level: process.env.LOG_LEVEL ?? 'info',
-});
+const logger = createLogger('jwt-auth');
 
 export interface JWTConfig {
   secret: string;
-  publicEndpoints?: string[];  // Endpoints that don't require auth
+  publicEndpoints?: string[]; // Endpoints that don't require auth
   enabled?: boolean;
 }
 
 export interface JWTPayload {
-  sub: string;  // User ID
+  sub: string; // User ID
   email: string;
   teams: string[];
   roles: string[];
@@ -37,11 +35,18 @@ export interface AuthenticatedRequest extends Request {
 /**
  * Create JWT middleware for Express
  */
-export function createJWTMiddleware(config: JWTConfig): (req: Request, res: Response, next: NextFunction) => void {
+export function createJWTMiddleware(
+  config: JWTConfig,
+): (req: Request, res: Response, next: NextFunction) => void {
   // Allow disabling auth for development
   if (!config.enabled) {
     return (_req: Request, _res: Response, next: NextFunction) => {
-      logger.warn('Authentication is disabled - not for production use!');
+      logger.warn('Authentication is disabled - not for production use!', {
+        enabled: false,
+        errorCode: 'AUTH_DISABLED',
+        errorType: 'security',
+        recoverable: false,
+      });
       next();
     };
   }
@@ -63,14 +68,12 @@ export function createJWTMiddleware(config: JWTConfig): (req: Request, res: Resp
       });
     }
 
-    const token = authHeader.startsWith('Bearer ')
-      ? authHeader.slice(7)
-      : authHeader;
+    const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : authHeader;
 
     try {
       // Verify and decode token
       const payload = jwt.verify(token, config.secret) as JWTPayload;
-      
+
       // Create user object
       const user: User = {
         id: payload.sub,
@@ -89,11 +92,12 @@ export function createJWTMiddleware(config: JWTConfig): (req: Request, res: Resp
 
       // Attach to request
       (req as AuthenticatedRequest).user = user;
-      
-      logger.debug({
+
+      logger.debug('Authenticated request', {
         userId: user.id,
-        teams: user.teams,
-      }, 'Authenticated request');
+        teamCount: user.teams?.length || 0,
+        roleCount: user.roles?.length || 0,
+      });
 
       next();
     } catch (error) {
@@ -115,7 +119,12 @@ export function createJWTMiddleware(config: JWTConfig): (req: Request, res: Resp
         });
       }
 
-      logger.error({ error }, 'Authentication error');
+      logger.error('Authentication error', {
+        err: error,
+        errorCode: 'AUTH_ERROR',
+        errorType: 'security',
+        recoverable: false,
+      });
       return res.status(500).json({
         error: {
           code: 'AUTH_ERROR',
@@ -137,7 +146,7 @@ export function generateToken(
     roles: string[];
   },
   secret: string,
-  expiresIn: string = '24h'
+  expiresIn: string = '24h',
 ): string {
   const payload: JWTPayload = {
     sub: user.id,
@@ -163,6 +172,6 @@ export function getAuthConfig(): JWTConfig {
   return {
     secret: process.env.JWT_SECRET || 'change-in-production',
     enabled: process.env.AUTH_ENABLED === 'true',
-    publicEndpoints: ['/health', '/mcp/health'],  // Health checks don't need auth
+    publicEndpoints: ['/health', '/mcp/health'], // Health checks don't need auth
   };
 }

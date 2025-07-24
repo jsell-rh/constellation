@@ -3,12 +3,10 @@
  * Simple in-memory cache implementation for development and testing
  */
 
-import pino from 'pino';
+import { createLogger } from '../observability/logger';
 import type { Cache, CacheConfig, CacheOptions, CacheMetrics } from './interface';
 
-const logger = pino({
-  level: process.env.LOG_LEVEL ?? 'info',
-});
+const logger = createLogger('memory-adapter');
 
 interface CacheEntry<T = unknown> {
   value: T;
@@ -66,7 +64,14 @@ export class MemoryAdapter implements Cache {
       return Promise.resolve(entry.value as T);
     } catch (error) {
       this.metrics.errors++;
-      logger.error({ error, key }, 'Memory cache get error');
+      logger.error('Memory cache get error', {
+        err: error,
+        key,
+        operation: 'get',
+        errorCode: 'MEMORY_CACHE_GET_ERROR',
+        errorType: 'cache',
+        recoverable: true,
+      });
       return Promise.resolve(null);
     }
   }
@@ -111,7 +116,14 @@ export class MemoryAdapter implements Cache {
       return Promise.resolve();
     } catch (error) {
       this.metrics.errors++;
-      logger.error({ error, key }, 'Memory cache set error');
+      logger.error('Memory cache set error', {
+        err: error,
+        key,
+        operation: 'set',
+        errorCode: 'MEMORY_CACHE_SET_ERROR',
+        errorType: 'cache',
+        recoverable: false,
+      });
       return Promise.reject(error);
     }
   }
@@ -134,7 +146,14 @@ export class MemoryAdapter implements Cache {
       return Promise.resolve(false);
     } catch (error) {
       this.metrics.errors++;
-      logger.error({ error, key }, 'Memory cache delete error');
+      logger.error('Memory cache delete error', {
+        err: error,
+        key,
+        operation: 'delete',
+        errorCode: 'MEMORY_CACHE_DELETE_ERROR',
+        errorType: 'cache',
+        recoverable: true,
+      });
       return Promise.resolve(false);
     }
   }
@@ -160,7 +179,14 @@ export class MemoryAdapter implements Cache {
       return Promise.resolve(true);
     } catch (error) {
       this.metrics.errors++;
-      logger.error({ error, key }, 'Memory cache exists error');
+      logger.error('Memory cache exists error', {
+        err: error,
+        key,
+        operation: 'exists',
+        errorCode: 'MEMORY_CACHE_EXISTS_ERROR',
+        errorType: 'cache',
+        recoverable: true,
+      });
       return Promise.resolve(false);
     }
   }
@@ -173,11 +199,20 @@ export class MemoryAdapter implements Cache {
       const count = this.storage.size;
       this.storage.clear();
       this.tagIndex.clear();
-      logger.info({ keysDeleted: count }, 'Memory cache cleared');
+      logger.info('Memory cache cleared', {
+        keysDeleted: count,
+        operation: 'clear',
+      });
       return Promise.resolve();
     } catch (error) {
       this.metrics.errors++;
-      logger.error({ error }, 'Memory cache clear error');
+      logger.error('Memory cache clear error', {
+        err: error,
+        operation: 'clear',
+        errorCode: 'MEMORY_CACHE_CLEAR_ERROR',
+        errorType: 'cache',
+        recoverable: false,
+      });
       return Promise.reject(error);
     }
   }
@@ -206,13 +241,24 @@ export class MemoryAdapter implements Cache {
       }
 
       if (totalInvalidated > 0) {
-        logger.info({ tags, invalidated: totalInvalidated }, 'Memory cache invalidated by tags');
+        logger.info('Memory cache invalidated by tags', {
+          tags,
+          keysInvalidated: totalInvalidated,
+          operation: 'invalidate_by_tags',
+        });
       }
 
       return Promise.resolve(totalInvalidated);
     } catch (error) {
       this.metrics.errors++;
-      logger.error({ error, tags }, 'Memory cache tag invalidation error');
+      logger.error('Memory cache tag invalidation error', {
+        err: error,
+        tags,
+        operation: 'invalidate_by_tags',
+        errorCode: 'MEMORY_CACHE_TAG_INVALIDATION_ERROR',
+        errorType: 'cache',
+        recoverable: true,
+      });
       return Promise.resolve(0);
     }
   }
@@ -233,7 +279,9 @@ export class MemoryAdapter implements Cache {
     }
     this.storage.clear();
     this.tagIndex.clear();
-    logger.info('Memory cache closed');
+    logger.info('Memory cache closed', {
+      adapter: 'memory',
+    });
     return Promise.resolve();
   }
 
@@ -297,7 +345,10 @@ export class MemoryAdapter implements Cache {
     }
 
     if (cleaned > 0) {
-      logger.debug({ cleaned }, 'Cleaned up expired cache entries');
+      logger.debug('Cleaned up expired cache entries', {
+        entriesCleaned: cleaned,
+        operation: 'cleanup',
+      });
     }
   }
 

@@ -15,11 +15,9 @@ import type { CircuitBreakerConfig } from '../resilience/circuit-breaker';
 import type { LibrarianCacheConfig } from '../cache/interface';
 import { getCacheManager } from '../cache/cache-manager';
 import { getLibrarianRegistry } from './librarian-registry';
-import pino from 'pino';
+import { createLogger } from '../observability/logger';
 
-const logger = pino({
-  level: process.env.LOG_LEVEL ?? 'info',
-});
+const logger = createLogger('secure-loader');
 
 export interface SecureLibrarianEntry {
   // Required fields
@@ -83,10 +81,19 @@ export async function loadRegistry(registryPath: string): Promise<RegistryConfig
       validateLibrarianEntry(entry);
     }
 
-    logger.info(`Loaded registry with ${config.librarians.length} librarians`);
+    logger.info('Loaded registry', {
+      librarianCount: config.librarians.length,
+      registryPath,
+    });
     return config;
   } catch (error) {
-    logger.error({ error, path: registryPath }, 'Failed to load registry');
+    logger.error('Failed to load registry', {
+      err: error,
+      path: registryPath,
+      errorCode: 'REGISTRY_LOAD_ERROR',
+      errorType: 'configuration',
+      recoverable: false,
+    });
     throw new Error(
       `Registry loading failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
     );
@@ -125,17 +132,14 @@ function validateLibrarianEntry(entry: SecureLibrarianEntry): void {
  */
 function createSecureLibrarian(librarianFn: Librarian, entry: SecureLibrarianEntry): Librarian {
   return async (query: string, context?: Context): Promise<Response> => {
-    logger.debug(
-      {
-        librarianId: entry.id,
-        hasContext: !!context,
-        hasUser: !!context?.user,
-        userId: context?.user?.id,
-        userTeams: context?.user?.teams,
-        permissions: entry.permissions,
-      },
-      'Secure librarian auth check',
-    );
+    logger.debug('Secure librarian auth check', {
+      librarianId: entry.id,
+      hasContext: !!context,
+      hasUser: !!context?.user,
+      userId: context?.user?.id,
+      userTeamCount: context?.user?.teams?.length || 0,
+      isPublic: entry.permissions?.public || false,
+    });
 
     // Public librarians bypass auth
     if (entry.permissions?.public) {
@@ -144,7 +148,13 @@ function createSecureLibrarian(librarianFn: Librarian, entry: SecureLibrarianEnt
 
     // Check authentication
     if (!context?.user) {
-      logger.warn({ librarianId: entry.id, context }, 'Unauthenticated access attempt');
+      logger.warn('Unauthenticated access attempt', {
+        librarianId: entry.id,
+        hasContext: !!context,
+        errorCode: 'UNAUTHENTICATED',
+        errorType: 'security',
+        recoverable: false,
+      });
       return {
         error: {
           code: 'UNAUTHENTICATED',
@@ -156,14 +166,14 @@ function createSecureLibrarian(librarianFn: Librarian, entry: SecureLibrarianEnt
     // Check authorization
     const authorized = checkAuthorization(context.user, entry);
     if (!authorized) {
-      logger.warn(
-        {
-          librarianId: entry.id,
-          userId: context.user.id,
-          userTeams: context.user.teams,
-        },
-        'Unauthorized access attempt',
-      );
+      logger.warn('Unauthorized access attempt', {
+        librarianId: entry.id,
+        userId: context.user.id,
+        userTeamCount: context.user.teams?.length || 0,
+        errorCode: 'UNAUTHORIZED',
+        errorType: 'security',
+        recoverable: false,
+      });
 
       return {
         error: {
@@ -175,14 +185,13 @@ function createSecureLibrarian(librarianFn: Librarian, entry: SecureLibrarianEnt
 
     // Log sensitive data access
     if (entry.permissions?.sensitiveData) {
-      logger.info(
-        {
-          librarianId: entry.id,
-          userId: context.user.id,
-          query: query.substring(0, 50) + '...', // Truncate for privacy
-        },
-        'Sensitive data access',
-      );
+      logger.info('Sensitive data access', {
+        librarianId: entry.id,
+        userId: context.user.id,
+        queryLength: query.length,
+        queryPreview: query.substring(0, 50) + '...',
+        action: 'sensitive_data_access',
+      });
     }
 
     // Execute the librarian with enriched context
@@ -309,28 +318,30 @@ export async function loadLibrarians(registryPath: string, router: SimpleRouter)
       // Register with router
       router.register(metadata, secureLibrarian);
 
-      logger.info(
-        {
-          id: entry.id,
-          team: entry.team,
-          public: entry.permissions?.public || false,
-        },
-        'Registered librarian',
-      );
+      logger.info('Registered librarian', {
+        librarianId: entry.id,
+        team: entry.team,
+        isPublic: entry.permissions?.public || false,
+        hasCache: !!entry.cache,
+        hasCircuitBreaker: !!entry.resilience?.circuit_breaker,
+      });
     } catch (error) {
-      logger.error(
-        {
-          error,
-          librarianId: entry.id,
-          functionPath: entry.function,
-        },
-        'Failed to load librarian',
-      );
+      logger.error('Failed to load librarian', {
+        err: error,
+        librarianId: entry.id,
+        functionPath: entry.function,
+        errorCode: 'LIBRARIAN_LOAD_ERROR',
+        errorType: 'configuration',
+        recoverable: true,
+      });
 
       // Continue loading others
       continue;
     }
   }
 
-  logger.info(`Successfully loaded ${router.getAllLibrarians().length} librarians`);
+  logger.info('Successfully loaded librarians', {
+    loadedCount: router.getAllLibrarians().length,
+    registeredCount: registry.librarians.length,
+  });
 }

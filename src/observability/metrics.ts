@@ -5,11 +5,9 @@
 
 import { register, collectDefaultMetrics, Counter, Histogram, Gauge, Summary } from 'prom-client';
 import type { Response } from '../types/core';
-import pino from 'pino';
+import { createLogger } from './logger';
 
-const logger = pino({
-  level: process.env.LOG_LEVEL ?? 'info',
-});
+const logger = createLogger('metrics');
 
 // Configure default metrics collection
 collectDefaultMetrics({
@@ -260,7 +258,10 @@ export function initializeMetricsEndpoint(app: any, port: number = 9090): void {
     }
   });
 
-  logger.info({ port }, 'Prometheus metrics endpoint initialized at /metrics');
+  logger.info('Prometheus metrics endpoint initialized', {
+    endpoint: '/metrics',
+    port,
+  });
 }
 
 /**

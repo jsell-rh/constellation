@@ -7,11 +7,9 @@ import path from 'path';
 import yaml from 'js-yaml';
 import nunjucks from 'nunjucks';
 import type { PromptLoader, PromptTemplate, PromptVariables, PromptMetadata } from './interface';
-import pino from 'pino';
+import { createLogger } from '../observability/logger';
 
-const logger = pino({
-  level: process.env.LOG_LEVEL ?? 'info',
-});
+const logger = createLogger('prompt-loader');
 
 export class FileSystemPromptLoader implements PromptLoader {
   private cache = new Map<string, PromptTemplate>();
@@ -51,13 +49,30 @@ export class FileSystemPromptLoader implements PromptLoader {
       this.cache.set(cacheKey, template);
 
       logger.debug(
-        { category, name, version: template.metadata.version },
+        {
+          category,
+          name,
+          version: template.metadata.version,
+          cacheKey,
+          templateSize: template.template.length,
+        },
         'Prompt template loaded',
       );
 
       return template;
     } catch (error) {
-      logger.error({ error, category, name }, 'Failed to load prompt template');
+      logger.error(
+        {
+          err: error,
+          category,
+          name,
+          filePath,
+          errorCode: 'PROMPT_LOAD_FAILED',
+          errorType: 'FILE_ERROR',
+          recoverable: false,
+        },
+        'Failed to load prompt template',
+      );
       throw new Error(`Failed to load prompt ${category}/${name}: ${(error as Error).message}`);
     }
   }
@@ -90,6 +105,7 @@ export class FileSystemPromptLoader implements PromptLoader {
           promptName: template.metadata.name,
           promptVersion: template.metadata.version,
           renderedLength: rendered.length,
+          variableKeys: Object.keys(variables),
         },
         'Successfully rendered prompt template',
       );
@@ -98,10 +114,13 @@ export class FileSystemPromptLoader implements PromptLoader {
     } catch (error) {
       logger.error(
         {
-          error,
+          err: error,
           promptName: template.metadata.name,
           promptVersion: template.metadata.version,
-          variables: Object.keys(variables),
+          variableKeys: Object.keys(variables),
+          errorCode: 'PROMPT_RENDER_FAILED',
+          errorType: 'TEMPLATE_ERROR',
+          recoverable: false,
         },
         'Failed to render prompt template',
       );
@@ -137,7 +156,14 @@ export class FileSystemPromptLoader implements PromptLoader {
               });
             } catch (error) {
               logger.warn(
-                { error, category: categoryDir.name, name },
+                {
+                  err: error,
+                  category: categoryDir.name,
+                  name,
+                  errorCode: 'PROMPT_LIST_ITEM_FAILED',
+                  errorType: 'FILE_ERROR',
+                  recoverable: true,
+                },
                 'Failed to load prompt for listing',
               );
             }
@@ -145,7 +171,16 @@ export class FileSystemPromptLoader implements PromptLoader {
         }
       }
     } catch (error) {
-      logger.error({ error }, 'Failed to list prompts');
+      logger.error(
+        {
+          err: error,
+          promptsDir: this.promptsDir,
+          errorCode: 'PROMPT_LIST_FAILED',
+          errorType: 'DIRECTORY_ERROR',
+          recoverable: false,
+        },
+        'Failed to list prompts',
+      );
     }
 
     return result;

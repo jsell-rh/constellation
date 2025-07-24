@@ -4,16 +4,14 @@
  */
 
 import { EventEmitter } from 'events';
-import pino from 'pino';
+import { createLogger } from '../observability/logger';
 import type { Cache, CacheConfig, LibrarianCacheConfig, CacheMetrics } from './interface';
 import { ValkeyAdapter } from './valkey-adapter';
 import { MemoryAdapter } from './memory-adapter';
 import { CacheKeyGenerator, defaultCacheKeyGenerator } from './cache-key-generator';
 import type { Context, Response } from '../types/core';
 
-const logger = pino({
-  level: process.env.LOG_LEVEL ?? 'info',
-});
+const logger = createLogger('cache-manager');
 
 export interface CacheManagerConfig {
   /** Global cache configuration */
@@ -43,15 +41,25 @@ export class CacheManager extends EventEmitter {
    */
   async initialize(): Promise<void> {
     if (!this.config.enabled || this.config.cache.type === 'none') {
-      logger.info('Caching disabled');
+      logger.info('Caching disabled', {
+        enabled: false,
+      });
       return;
     }
 
     try {
       this.cacheInstance = await this.createCacheInstance();
-      logger.info({ type: this.config.cache.type }, 'Cache manager initialized');
+      logger.info('Cache manager initialized', {
+        cacheType: this.config.cache.type,
+        enabled: true,
+      });
     } catch (error) {
-      logger.error({ error }, 'Failed to initialize cache manager');
+      logger.error('Failed to initialize cache manager', {
+        err: error,
+        errorCode: 'CACHE_MANAGER_INIT_ERROR',
+        errorType: 'infrastructure',
+        recoverable: false,
+      });
       throw error;
     }
   }
@@ -81,15 +89,30 @@ export class CacheManager extends EventEmitter {
 
       if (cached) {
         this.emit('hit', { librarianId, query: query.substring(0, 50) });
-        logger.debug({ librarianId, cacheKey }, 'Cache hit');
+        logger.debug('Cache hit', {
+          librarianId,
+          cacheKey,
+          operation: 'get',
+        });
       } else {
         this.emit('miss', { librarianId, query: query.substring(0, 50) });
-        logger.debug({ librarianId, cacheKey }, 'Cache miss');
+        logger.debug('Cache miss', {
+          librarianId,
+          cacheKey,
+          operation: 'get',
+        });
       }
 
       return cached;
     } catch (error) {
-      logger.error({ error, librarianId }, 'Error getting from cache');
+      logger.error('Error getting from cache', {
+        err: error,
+        librarianId,
+        operation: 'get',
+        errorCode: 'CACHE_GET_ERROR',
+        errorType: 'cache',
+        recoverable: true,
+      });
       this.emit('error', { error, operation: 'get', librarianId });
       return null; // Fail gracefully
     }
@@ -133,9 +156,21 @@ export class CacheManager extends EventEmitter {
       await this.cacheInstance.set(cacheKey, response, cacheOptions);
 
       this.emit('set', { librarianId, query: query.substring(0, 50), ttl });
-      logger.debug({ librarianId, cacheKey, ttl }, 'Response cached');
+      logger.debug('Response cached', {
+        librarianId,
+        cacheKey,
+        ttlSeconds: ttl,
+        operation: 'set',
+      });
     } catch (error) {
-      logger.error({ error, librarianId }, 'Error setting cache');
+      logger.error('Error setting cache', {
+        err: error,
+        librarianId,
+        operation: 'set',
+        errorCode: 'CACHE_SET_ERROR',
+        errorType: 'cache',
+        recoverable: true,
+      });
       this.emit('error', { error, operation: 'set', librarianId });
       // Don't throw - caching errors shouldn't break the response
     }
@@ -151,11 +186,22 @@ export class CacheManager extends EventEmitter {
 
     try {
       const invalidated = await this.cacheInstance.invalidateByTags([librarianId]);
-      logger.info({ librarianId, invalidated }, 'Cache invalidated');
+      logger.info('Cache invalidated', {
+        librarianId,
+        keysInvalidated: invalidated,
+        operation: 'invalidate',
+      });
       this.emit('invalidate', { librarianId, count: invalidated });
       return invalidated;
     } catch (error) {
-      logger.error({ error, librarianId }, 'Error invalidating cache');
+      logger.error('Error invalidating cache', {
+        err: error,
+        librarianId,
+        operation: 'invalidate',
+        errorCode: 'CACHE_INVALIDATION_ERROR',
+        errorType: 'cache',
+        recoverable: true,
+      });
       this.emit('error', { error, operation: 'invalidate', librarianId });
       return 0;
     }
@@ -171,11 +217,22 @@ export class CacheManager extends EventEmitter {
 
     try {
       const invalidated = await this.cacheInstance.invalidateByTags(tags);
-      logger.info({ tags, invalidated }, 'Cache invalidated by tags');
+      logger.info('Cache invalidated by tags', {
+        tags,
+        keysInvalidated: invalidated,
+        operation: 'invalidate_by_tags',
+      });
       this.emit('invalidateByTags', { tags, count: invalidated });
       return invalidated;
     } catch (error) {
-      logger.error({ error, tags }, 'Error invalidating cache by tags');
+      logger.error('Error invalidating cache by tags', {
+        err: error,
+        tags,
+        operation: 'invalidate_by_tags',
+        errorCode: 'CACHE_TAG_INVALIDATION_ERROR',
+        errorType: 'cache',
+        recoverable: true,
+      });
       this.emit('error', { error, operation: 'invalidateByTags', tags });
       return 0;
     }
@@ -190,7 +247,10 @@ export class CacheManager extends EventEmitter {
       ...config,
     });
 
-    logger.debug({ librarianId, config }, 'Librarian cache configured');
+    logger.debug('Librarian cache configured', {
+      librarianId,
+      cacheConfig: config,
+    });
   }
 
   /**
@@ -230,10 +290,18 @@ export class CacheManager extends EventEmitter {
 
     try {
       await this.cacheInstance.clear();
-      logger.info('All caches cleared');
+      logger.info('All caches cleared', {
+        operation: 'clear_all',
+      });
       this.emit('clear');
     } catch (error) {
-      logger.error({ error }, 'Error clearing cache');
+      logger.error('Error clearing cache', {
+        err: error,
+        operation: 'clear_all',
+        errorCode: 'CACHE_CLEAR_ERROR',
+        errorType: 'cache',
+        recoverable: false,
+      });
       this.emit('error', { error, operation: 'clear' });
       throw error;
     }
@@ -249,7 +317,9 @@ export class CacheManager extends EventEmitter {
     }
 
     this.librarianConfigs.clear();
-    logger.info('Cache manager closed');
+    logger.info('Cache manager closed', {
+      hadCacheInstance: !!this.cacheInstance,
+    });
   }
 
   /**
