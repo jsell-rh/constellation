@@ -54,6 +54,9 @@ export interface Context {
   /** Distributed tracing context */
   trace?: TraceContext;
 
+  /** Unique request identifier for correlation */
+  requestId?: string;
+
   /** Chain of librarians that led to this call (for loop detection) */
   delegationChain?: string[];
 

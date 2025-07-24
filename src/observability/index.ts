@@ -9,6 +9,9 @@ export * from './tracing';
 // Prometheus metrics
 export * from './metrics';
 
+// Structured logging
+export * from './logger';
+
 // Re-export commonly used OpenTelemetry types
 export {
   SpanStatusCode,

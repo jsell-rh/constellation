@@ -9,11 +9,9 @@ import type { LibrarianInfo } from '../types/core';
 import type { DelegationDecision } from './engine';
 import { getLibrarianRegistry } from '../registry/librarian-registry';
 import { getPromptLoader } from '../prompts/loader';
-import pino from 'pino';
+import { createLogger, createContextLogger, PerformanceTimer } from '../observability/logger';
 
-const logger = pino({
-  level: process.env.LOG_LEVEL ?? 'info',
-});
+const moduleLogger = createLogger('ai-analyzer');
 
 export interface LibrarianCandidate {
   id: string;
@@ -45,16 +43,37 @@ export class AIQueryAnalyzer {
     availableLibrarians: LibrarianInfo[],
     context: Context,
   ): Promise<AnalysisResult> {
-    logger.info({ query, librarianCount: availableLibrarians.length }, 'Analyzing query with AI');
+    const logger = createContextLogger('ai-analyzer', context);
+    const timer = new PerformanceTimer();
+
+    logger.info(
+      {
+        queryLength: query.length,
+        librarianCount: availableLibrarians.length,
+        aiProvider: this.aiClient.defaultProvider.name,
+      },
+      'Analyzing query with AI',
+    );
 
     // Step 1: Understand query intent and required capabilities
+    timer.mark('intent_analysis_start');
     const queryAnalysis = await this.analyzeQueryIntent(query);
+    timer.mark('intent_analysis_complete');
 
     // Step 2: Filter librarians by user permissions
     const authorizedLibrarians = this.filterByAuthorization(availableLibrarians, context);
 
     if (authorizedLibrarians.length === 0) {
-      logger.warn({ userId: context.user?.id }, 'No authorized librarians for user');
+      logger.warn(
+        {
+          userId: context.user?.id,
+          userTeams: context.user?.teams,
+          availableCount: availableLibrarians.length,
+          errorCode: 'NO_AUTHORIZED_LIBRARIANS',
+          errorType: 'AUTHORIZATION_ERROR',
+        },
+        'No authorized librarians for user',
+      );
       return {
         queryIntent: queryAnalysis.intent,
         requiredCapabilities: queryAnalysis.capabilities,
@@ -68,15 +87,36 @@ export class AIQueryAnalyzer {
     }
 
     // Step 3: Score each authorized librarian for relevance
+    timer.mark('scoring_start');
     const candidates = await this.scoreLibrarians(
       query,
       queryAnalysis,
       authorizedLibrarians,
       context,
     );
+    timer.mark('scoring_complete');
 
     // Step 4: Select top candidates
     const decision = this.makeRoutingDecision(candidates, queryAnalysis);
+
+    logger.info(
+      {
+        intent: queryAnalysis.intent,
+        capabilityCount: queryAnalysis.capabilities.length,
+        candidateCount: candidates.length,
+        selectedCount: decision.librarians.length,
+        confidence: decision.confidence,
+        timings: {
+          intentAnalysisMs: timer.getDurationBetween(
+            'intent_analysis_start',
+            'intent_analysis_complete',
+          ),
+          scoringMs: timer.getDurationBetween('scoring_start', 'scoring_complete'),
+          totalMs: timer.getDuration(),
+        },
+      },
+      'AI analysis completed',
+    );
 
     return {
       queryIntent: queryAnalysis.intent,
@@ -92,6 +132,7 @@ export class AIQueryAnalyzer {
   private async analyzeQueryIntent(
     query: string,
   ): Promise<{ intent: string; capabilities: string[] }> {
+    const timer = new PerformanceTimer();
     try {
       // Use the prompt management system
       const promptLoader = getPromptLoader();
@@ -124,10 +165,27 @@ export class AIQueryAnalyzer {
           throw new Error('Invalid response structure');
         }
 
-        logger.debug({ query, analysis }, 'Query intent analyzed');
+        moduleLogger.debug(
+          {
+            queryLength: query.length,
+            intent: analysis.intent,
+            capabilityCount: analysis.capabilities.length,
+            analysisTimeMs: timer.getDuration(),
+          },
+          'Query intent analyzed',
+        );
         return analysis;
       } catch (parseError) {
-        logger.warn({ response, parseError }, 'Failed to parse AI response as JSON');
+        moduleLogger.warn(
+          {
+            responseLength: response.length,
+            err: parseError,
+            errorCode: 'JSON_PARSE_ERROR',
+            errorType: 'PARSING_ERROR',
+            recoverable: true,
+          },
+          'Failed to parse AI response as JSON',
+        );
 
         // Try to extract intent from plain text response
         const intent = response.includes('security')
@@ -142,7 +200,16 @@ export class AIQueryAnalyzer {
         };
       }
     } catch (error) {
-      logger.error({ error, query }, 'Failed to analyze query intent');
+      moduleLogger.error(
+        {
+          err: error,
+          queryLength: query.length,
+          errorCode: 'INTENT_ANALYSIS_FAILED',
+          errorType: 'AI_ERROR',
+          recoverable: true,
+        },
+        'Failed to analyze query intent',
+      );
       // Fallback to simple analysis
       return {
         intent: 'General query',
@@ -199,6 +266,8 @@ export class AIQueryAnalyzer {
     librarians: LibrarianInfo[],
     context: Context,
   ): Promise<LibrarianCandidate[]> {
+    const logger = createContextLogger('ai-analyzer', context);
+    const timer = new PerformanceTimer();
     const candidates: LibrarianCandidate[] = [];
 
     // Use AI to score each librarian
@@ -217,9 +286,19 @@ export class AIQueryAnalyzer {
     });
 
     await Promise.all(scoringPromises);
+    timer.mark('scoring_complete');
 
     // Sort by total score
     candidates.sort((a, b) => b.totalScore - a.totalScore);
+
+    logger.debug(
+      {
+        candidateCount: candidates.length,
+        topScore: candidates[0]?.totalScore,
+        scoringTimeMs: timer.getDuration(),
+      },
+      'Librarian scoring completed',
+    );
 
     return candidates;
   }
@@ -254,7 +333,16 @@ export class AIQueryAnalyzer {
       const score = parseInt(response.trim(), 10);
       return isNaN(score) ? 0 : Math.min(100, Math.max(0, score));
     } catch (error) {
-      logger.error({ error, librarian: librarian.id }, 'Failed to score relevance');
+      moduleLogger.error(
+        {
+          err: error,
+          librarianId: librarian.id,
+          errorCode: 'RELEVANCE_SCORING_FAILED',
+          errorType: 'AI_ERROR',
+          recoverable: true,
+        },
+        'Failed to score relevance',
+      );
       // Fallback to simple keyword matching
       return this.fallbackScoring(query, librarian);
     }

@@ -17,11 +17,15 @@ import {
   recordResponseMetrics,
   librarianRegistrations,
 } from '../observability';
-import pino from 'pino';
+import {
+  createLogger,
+  createContextLogger,
+  PerformanceTimer,
+  logPerformance,
+  type LogContext,
+} from '../observability/logger';
 
-const logger = pino({
-  level: process.env.LOG_LEVEL ?? 'info',
-});
+const moduleLogger = createLogger('router');
 
 export interface RouterOptions {
   /** Executor instance to use for routing */
@@ -50,6 +54,13 @@ export class SimpleRouter {
 
     // Check for duplicate registration
     if (this.librarians.has(metadata.id)) {
+      moduleLogger.warn(
+        {
+          librarianId: metadata.id,
+          existingLibrarians: Array.from(this.librarians.keys()),
+        },
+        'Attempted to register duplicate librarian',
+      );
       throw new Error(`Librarian with ID '${metadata.id}' is already registered`);
     }
 
@@ -59,16 +70,30 @@ export class SimpleRouter {
 
     // Update metrics - just set total count without labels
     librarianRegistrations.set({}, this.librarians.size);
+
+    // Log registration with structured data
+    moduleLogger.info(
+      {
+        librarianId: metadata.id,
+        librarianName: metadata.name,
+        team: metadata.team,
+        capabilities: metadata.capabilities,
+        totalLibrarians: this.librarians.size,
+      },
+      'Librarian registered successfully',
+    );
   }
 
   /**
    * Route a query to a specific librarian
    */
   async route(query: string, librarianId: string, context: Context = {}): Promise<Response> {
+    const logger = createContextLogger('router', context);
+    const timer = new PerformanceTimer();
+
     // Record query metrics
     recordQuery();
     activeQueries.inc({ librarian: librarianId });
-    const startTime = Date.now();
 
     return withSpan(SpanNames.QUERY_ROUTING, async (span) => {
       // Add span attributes
@@ -133,8 +158,11 @@ export class SimpleRouter {
         span.setAttribute(SpanAttributes.RESPONSE_SOURCE_COUNT, response.sources.length);
       }
 
+      // Mark execution time
+      timer.mark('execution');
+
       // Record completion metrics
-      const duration = (Date.now() - startTime) / 1000; // Convert to seconds
+      const duration = timer.getDuration() / 1000; // Convert to seconds
       const status = response.error ? 'error' : 'success';
 
       queryCounter.inc({
@@ -148,18 +176,39 @@ export class SimpleRouter {
 
       activeQueries.dec({ librarian: librarianId });
 
+      // Log performance with structured data
+      const perfContext: LogContext = {
+        librarianId,
+        ...(status !== undefined && { status }),
+        ...(response.confidence !== undefined && { responseConfidence: response.confidence }),
+        ...(response.sources?.length !== undefined && { sourceCount: response.sources.length }),
+        ...(response.error?.code !== undefined && { errorCode: response.error.code }),
+      };
+      logPerformance(logger, 'query.route', timer, perfContext);
+
       return response;
     }).catch((error) => {
       // Handle any unexpected errors
       activeQueries.dec({ librarian: librarianId });
 
-      const duration = (Date.now() - startTime) / 1000;
+      const duration = timer.getDuration() / 1000;
       queryCounter.inc({
         librarian: librarianId,
         status: 'error',
         error_code: 'UNEXPECTED_ERROR',
       });
       recordQueryDuration(duration, { librarian: librarianId, status: 'error' });
+
+      logger.error(
+        {
+          err: error,
+          librarianId,
+          queryLength: query.length,
+          errorType: 'ROUTING_ERROR',
+          recoverable: false,
+        },
+        'Query routing failed with unexpected error',
+      );
 
       throw error;
     });

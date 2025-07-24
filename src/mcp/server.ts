@@ -10,13 +10,16 @@ import type { Context, Response, User } from '../types/core';
 import { DelegationEngine } from '../delegation/engine';
 import { createJWTMiddleware, getAuthConfig, getUserFromRequest } from '../auth/jwt-middleware';
 import { getLibrarianRegistry } from '../registry/librarian-registry';
-import pino from 'pino';
+import { createLogger } from '../observability/logger';
+import {
+  generateRequestId,
+  enrichContextWithRequestId,
+  requestIdMiddleware,
+} from '../core/request-id';
 import { z } from 'zod';
 import type { Request, Response as ExpressResponse } from 'express';
 
-const logger = pino({
-  level: process.env.LOG_LEVEL ?? 'info',
-});
+const logger = createLogger('mcp-server');
 
 export interface MCPServerOptions {
   /** Server name */
@@ -135,13 +138,25 @@ Restricted librarians require user context with appropriate teams/roles.`,
         },
       },
       async ({ query, context }) => {
-        logger.info({ query, context }, 'Processing query via delegation engine');
+        // Generate request ID for this query
+        const requestId = generateRequestId();
+
+        logger.info(
+          {
+            requestId,
+            query,
+            hasContext: !!context,
+            hasUser: !!(user || context?.user),
+          },
+          'Processing query via delegation engine',
+        );
 
         // Merge router's default context (includes AI client) with MCP context
         const defaultContext = this.getDefaultContext();
 
         const constellationContext: Context = {
           ...defaultContext, // This includes the AI client!
+          requestId,
           metadata: {
             source: 'mcp',
             ...(context?.metadata || {}),
@@ -158,16 +173,20 @@ Restricted librarians require user context with appropriate teams/roles.`,
             }),
         };
 
+        // Enrich context with request ID (handles existing IDs)
+        const enrichedContext = enrichContextWithRequestId(constellationContext);
+
         logger.info(
           {
+            requestId,
             constellationContext: {
-              ...constellationContext,
-              ai: constellationContext.ai ? '[AI Client Present]' : undefined,
+              ...enrichedContext,
+              ai: enrichedContext.ai ? '[AI Client Present]' : undefined,
             },
           },
           'Context being passed to delegation engine',
         );
-        const response = await this.delegationEngine.route(query, constellationContext);
+        const response = await this.delegationEngine.route(query, enrichedContext);
         return this.formatMCPResponse(response);
       },
     );
@@ -209,13 +228,24 @@ Note: Authentication requirements depend on the librarian:
         },
       },
       async ({ librarian_id, query, context }) => {
-        logger.info({ librarian_id, query }, 'Processing direct librarian query');
+        // Generate request ID for this query
+        const requestId = generateRequestId();
+
+        logger.info(
+          {
+            requestId,
+            librarianId: librarian_id,
+            query,
+          },
+          'Processing direct librarian query',
+        );
 
         // Merge router's default context (includes AI client) with MCP context
         const defaultContext = this.getDefaultContext();
 
         const constellationContext: Context = {
           ...defaultContext, // This includes the AI client!
+          requestId,
           metadata: {
             source: 'mcp',
             forced_routing: true,
@@ -233,7 +263,10 @@ Note: Authentication requirements depend on the librarian:
             }),
         };
 
-        const response = await this.router.route(query, librarian_id, constellationContext);
+        // Enrich context with request ID (handles existing IDs)
+        const enrichedContext = enrichContextWithRequestId(constellationContext);
+
+        const response = await this.router.route(query, librarian_id, enrichedContext);
         return this.formatMCPResponse(response);
       },
     );
@@ -252,7 +285,7 @@ Note: Authentication requirements depend on the librarian:
         },
       },
       ({ include_permissions = true }) => {
-        logger.info('Listing available librarians');
+        logger.info({ includePermissions: include_permissions }, 'Listing available librarians');
 
         const librarians = this.router.getAllLibrarians();
         const registry = getLibrarianRegistry();
@@ -371,9 +404,12 @@ Note: Authentication requirements depend on the librarian:
     app.use(
       cors.default({
         origin: '*',
-        exposedHeaders: ['Mcp-Session-Id'],
+        exposedHeaders: ['Mcp-Session-Id', 'X-Request-ID'],
       }),
     );
+
+    // Add request ID middleware
+    app.use(requestIdMiddleware);
 
     // Health check endpoint (before auth middleware)
     app.get('/health', (_req, res) => {

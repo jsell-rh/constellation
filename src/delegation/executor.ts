@@ -5,11 +5,7 @@
 import type { SimpleRouter } from '../core/router';
 import type { Context, Response, DelegateRequest } from '../types/core';
 import { errorResponse } from '../types/librarian-factory';
-import pino from 'pino';
-
-const logger = pino({
-  level: process.env.LOG_LEVEL ?? 'info',
-});
+import { createContextLogger, PerformanceTimer } from '../observability/logger';
 
 const MAX_DELEGATION_DEPTH = 5;
 
@@ -28,6 +24,9 @@ export class DelegationExecutor {
    * Execute a query, handling any delegation responses
    */
   async execute(query: string, librarianId: string, context: Context): Promise<Response> {
+    const logger = createContextLogger('delegation-executor', context);
+    const timer = new PerformanceTimer();
+
     // Calculate deadline if timeout is provided
     const deadline = context.timeout ? Date.now() + context.timeout : undefined;
 
@@ -40,7 +39,29 @@ export class DelegationExecutor {
       ...(context.timeout !== undefined && { remainingTimeout: context.timeout }),
     };
 
-    return this.executeWithDelegation(query, librarianId, delegationContext);
+    logger.info(
+      {
+        librarianId,
+        queryLength: query.length,
+        hasTimeout: !!context.timeout,
+        timeout: context.timeout,
+      },
+      'Starting delegation execution',
+    );
+
+    const response = await this.executeWithDelegation(query, librarianId, delegationContext);
+
+    logger.info(
+      {
+        librarianId,
+        executionTimeMs: timer.getDuration(),
+        delegationDepth: delegationContext.delegationDepth,
+        responseType: response.answer ? 'answer' : response.delegate ? 'delegate' : 'error',
+      },
+      'Delegation execution completed',
+    );
+
+    return response;
   }
 
   private async executeWithDelegation(
@@ -48,13 +69,38 @@ export class DelegationExecutor {
     librarianId: string,
     context: DelegationContext,
   ): Promise<Response> {
+    const logger = createContextLogger('delegation-executor', context);
+    const timer = new PerformanceTimer();
+
     // Check if we've exceeded the deadline
     if (context.deadline && Date.now() >= context.deadline) {
+      logger.warn(
+        {
+          librarianId,
+          deadline: context.deadline,
+          currentTime: Date.now(),
+          errorCode: 'TIMEOUT_EXCEEDED',
+          errorType: 'TIMEOUT_ERROR',
+        },
+        'Request timeout exceeded before execution',
+      );
+
       return errorResponse('TIMEOUT_EXCEEDED', 'Request timeout exceeded before execution');
     }
 
     // Check delegation depth
     if ((context.delegationDepth ?? 0) >= MAX_DELEGATION_DEPTH) {
+      logger.warn(
+        {
+          librarianId,
+          delegationDepth: context.delegationDepth,
+          maxDepth: MAX_DELEGATION_DEPTH,
+          delegationChain: context.delegationChain,
+          errorCode: 'MAX_DELEGATION_DEPTH_EXCEEDED',
+        },
+        'Maximum delegation depth exceeded',
+      );
+
       return errorResponse(
         'MAX_DELEGATION_DEPTH_EXCEEDED',
         `Maximum delegation depth of ${MAX_DELEGATION_DEPTH} exceeded`,
@@ -63,6 +109,16 @@ export class DelegationExecutor {
 
     // Check for loops
     if (context.delegationChain?.includes(librarianId)) {
+      logger.warn(
+        {
+          librarianId,
+          delegationChain: context.delegationChain,
+          errorCode: 'DELEGATION_LOOP_DETECTED',
+          errorType: 'LOOP_ERROR',
+        },
+        'Delegation loop detected',
+      );
+
       return errorResponse(
         'DELEGATION_LOOP_DETECTED',
         `Delegation loop detected: ${context.delegationChain.join(' -> ')} -> ${librarianId}`,
@@ -87,7 +143,7 @@ export class DelegationExecutor {
 
     try {
       // Execute the librarian with timeout
-      const startTime = Date.now();
+      timer.mark('execution_start');
 
       const executePromise = this.router.route(query, librarianId, updatedContext);
 
@@ -102,6 +158,17 @@ export class DelegationExecutor {
           response = await Promise.race([executePromise, timeoutPromise]);
         } catch (error) {
           if (error instanceof Error && error.message === 'Librarian execution timeout') {
+            logger.warn(
+              {
+                librarianId,
+                remainingTimeout,
+                errorCode: 'LIBRARIAN_TIMEOUT',
+                errorType: 'TIMEOUT_ERROR',
+                recoverable: true,
+              },
+              'Librarian execution timed out',
+            );
+
             return errorResponse(
               'LIBRARIAN_TIMEOUT',
               `Librarian '${librarianId}' execution timed out after ${remainingTimeout}ms`,
@@ -113,7 +180,8 @@ export class DelegationExecutor {
         response = await executePromise;
       }
 
-      const executionTime = Date.now() - startTime;
+      timer.mark('execution_complete');
+      const executionTime = timer.getDurationBetween('execution_start', 'execution_complete');
 
       // If response contains delegation, execute it
       if (response.delegate) {
@@ -129,21 +197,25 @@ export class DelegationExecutor {
 
         logger.info(
           {
-            from: librarianId,
-            to: delegateRequest.to,
-            chain: updatedContext.delegationChain,
+            fromLibrarian: librarianId,
+            toLibrarian: delegateRequest.to,
+            delegationChain: updatedContext.delegationChain,
+            delegationDepth: updatedContext.delegationDepth,
             reason: delegateRequest.context?.reason,
+            remainingTimeout,
           },
           'Executing delegation',
         );
 
         // Execute the delegation
+        timer.mark('delegation_start');
         const delegatedQuery = delegateRequest.query ?? query;
         const delegatedResponse = await this.executeWithDelegation(
           delegatedQuery,
           delegateRequest.to,
           updatedContext,
         );
+        timer.mark('delegation_complete');
 
         // Add delegation metadata
         return {
@@ -153,7 +225,7 @@ export class DelegationExecutor {
             delegated: true,
             delegationChain: [...(updatedContext.delegationChain ?? []), delegateRequest.to],
             delegationReason: delegateRequest.context?.reason,
-            executionTime: Date.now() - startTime,
+            executionTime: timer.getDuration(),
           },
         };
       }
@@ -171,10 +243,14 @@ export class DelegationExecutor {
       const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error(
         {
-          error,
+          err: error,
           librarianId,
-          query,
-          chain: context.delegationChain,
+          queryLength: query.length,
+          delegationChain: context.delegationChain,
+          delegationDepth: context.delegationDepth,
+          errorCode: 'EXECUTION_ERROR',
+          errorType: error instanceof Error ? error.constructor.name : 'UnknownError',
+          recoverable: false,
         },
         'Error executing librarian',
       );

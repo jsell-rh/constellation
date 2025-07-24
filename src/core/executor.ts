@@ -23,11 +23,14 @@ import {
 } from '../observability';
 import { getCircuitBreakerManager } from '../resilience/circuit-breaker-manager';
 import { getCacheManager } from '../cache/cache-manager';
-import pino from 'pino';
+import {
+  createLogger,
+  createContextLogger,
+  PerformanceTimer,
+  logPerformance,
+} from '../observability/logger';
 
-const logger = pino({
-  level: process.env.LOG_LEVEL ?? 'info',
-});
+const moduleLogger = createLogger('executor');
 
 export interface ExecutorOptions {
   /** Default timeout in milliseconds */
@@ -81,8 +84,9 @@ export class LibrarianExecutor extends EventEmitter {
    * Execute a librarian function with enriched context
    */
   async execute(librarian: Librarian, query: string, context: Context = {}): Promise<Response> {
-    const startTime = Date.now();
+    const timer = new PerformanceTimer();
     const librarianId = context.librarian?.id || 'unknown';
+    const logger = createContextLogger('executor', context);
 
     // Enrich context
     const enrichedContext: Context = {
@@ -95,11 +99,22 @@ export class LibrarianExecutor extends EventEmitter {
       enrichedContext.ai = this.aiClient;
     }
 
+    // Log execution start
+    logger.info(
+      {
+        librarianId,
+        queryLength: query.length,
+        hasUser: !!enrichedContext.user,
+        hasAI: !!enrichedContext.ai,
+      },
+      'Starting librarian execution',
+    );
+
     // Emit start event
     this.emit('execute:start', {
       query,
       context: enrichedContext,
-      timestamp: startTime,
+      timestamp: Date.now(),
     } as ExecuteEvent);
 
     // Execute within an OpenTelemetry span
@@ -136,23 +151,34 @@ export class LibrarianExecutor extends EventEmitter {
             // Record cache hit metric
             cacheHits.inc({ librarian: librarianId, cache_type: 'response' });
 
+            timer.mark('cache_hit');
+
             // Add cache metadata to response
             const responseWithMetadata: Response = {
               ...cachedResponse,
               metadata: {
                 ...cachedResponse.metadata,
                 cached: true,
-                executionTimeMs: Date.now() - startTime,
+                executionTimeMs: timer.getDuration(),
                 traceId: enrichedContext.trace?.traceId,
               },
             };
+
+            logger.info(
+              {
+                librarianId,
+                cached: true,
+                responseConfidence: cachedResponse.confidence,
+              },
+              'Returning cached response',
+            );
 
             this.emit('execute:complete', {
               query,
               context: enrichedContext,
               timestamp: Date.now(),
               response: responseWithMetadata,
-              executionTimeMs: Date.now() - startTime,
+              executionTimeMs: timer.getDuration(),
             } as CompleteEvent);
 
             return responseWithMetadata;
@@ -165,6 +191,8 @@ export class LibrarianExecutor extends EventEmitter {
 
           // Record cache miss metric
           cacheMisses.inc({ librarian: librarianId, cache_type: 'response' });
+
+          timer.mark('cache_checked');
 
           // Get circuit breaker for this librarian
           const circuitBreakerConfig = context.librarian?.circuitBreaker;
@@ -185,6 +213,7 @@ export class LibrarianExecutor extends EventEmitter {
           );
 
           execTimer(); // Record execution duration
+          timer.mark('execution_complete');
 
           addSpanEvent('librarian.execution.complete');
 
@@ -216,11 +245,20 @@ export class LibrarianExecutor extends EventEmitter {
 
           // Cache the response (async, don't wait)
           void cacheManager.set(librarianId, query, enrichedContext, response).catch((error) => {
-            logger.warn({ error, librarianId }, 'Failed to cache response');
+            moduleLogger.warn(
+              {
+                err: error,
+                librarianId,
+                errorCode: 'CACHE_SET_FAILED',
+                errorType: 'CACHE_ERROR',
+                recoverable: true,
+              },
+              'Failed to cache response',
+            );
           });
 
           // Add execution metadata
-          const executionTimeMs = Date.now() - startTime;
+          const executionTimeMs = timer.getDuration();
           const enhancedResponse: Response = {
             ...response,
             metadata: {
@@ -230,6 +268,14 @@ export class LibrarianExecutor extends EventEmitter {
               traceId: enrichedContext.trace?.traceId,
             },
           };
+
+          // Log successful execution
+          logPerformance(logger, 'librarian.execute', timer, {
+            librarianId,
+            responseType: response.answer ? 'answer' : response.delegate ? 'delegate' : 'error',
+            confidence: response.confidence,
+            sourceCount: response.sources?.length,
+          });
 
           // Add response attributes to span
           addSpanAttributes({
@@ -251,9 +297,20 @@ export class LibrarianExecutor extends EventEmitter {
 
           return enhancedResponse;
         } catch (error) {
+          timer.mark('error');
           addSpanEvent('librarian.execution.error', {
             error: error instanceof Error ? error.message : 'Unknown error',
           });
+
+          logger.error(
+            {
+              err: error,
+              librarianId,
+              errorType: 'EXECUTION_ERROR',
+              recoverable: error instanceof Error && error.message.includes('timeout'),
+            },
+            'Librarian execution failed',
+          );
 
           // Check if it's a circuit breaker error (already a Response)
           if (
@@ -368,8 +425,20 @@ export class LibrarianExecutor extends EventEmitter {
    * Handle execution errors
    */
   private handleExecutionError(error: Error, query: string, context: Context): Response {
+    const logger = createContextLogger('executor', context);
     // Handle timeout errors specifically
     if (error.message.includes('timeout')) {
+      logger.warn(
+        {
+          librarianId: context.librarian?.id,
+          timeout: context.timeout ?? this.options.defaultTimeout,
+          errorCode: 'TIMEOUT',
+          errorType: 'TIMEOUT_ERROR',
+          recoverable: true,
+        },
+        'Librarian execution timed out',
+      );
+
       return this.createErrorResponse('TIMEOUT', error.message, {
         query,
         librarian: context.librarian?.id,
@@ -379,6 +448,17 @@ export class LibrarianExecutor extends EventEmitter {
 
     // This should rarely happen as createLibrarian catches errors
     // But we handle it as a safety net
+    logger.error(
+      {
+        err: error,
+        librarianId: context.librarian?.id,
+        errorCode: 'EXECUTOR_ERROR',
+        errorType: error.constructor.name,
+        recoverable: false,
+      },
+      'Unexpected executor error',
+    );
+
     return this.createErrorResponse('EXECUTOR_ERROR', error.message, {
       query,
       librarian: context.librarian?.id,

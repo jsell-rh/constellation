@@ -25,11 +25,14 @@ import {
   parallelDelegations,
   recordResponseMetrics,
 } from '../observability';
-import pino from 'pino';
+import {
+  createLogger,
+  createContextLogger,
+  PerformanceTimer,
+  logPerformance,
+} from '../observability/logger';
 
-const logger = pino({
-  level: process.env.LOG_LEVEL ?? 'info',
-});
+const moduleLogger = createLogger('delegation-engine');
 
 export interface DelegationDecision {
   librarians: string[];
@@ -75,12 +78,28 @@ export class DelegationEngine {
       aiClient = options.aiClient || getAIClient();
       if (aiClient.defaultProvider.isAvailable()) {
         this.aiAnalyzer = new AIQueryAnalyzer(aiClient);
-        logger.info('Delegation engine initialized with AI support');
+        moduleLogger.info(
+          {
+            aiProvider: aiClient.defaultProvider.name,
+            enableParallelRouting: this.enableParallelRouting,
+            maxParallelQueries: this.maxParallelQueries,
+            aggregationStrategy: options.aggregationStrategy || 'best-confidence',
+          },
+          'Delegation engine initialized with AI support',
+        );
       } else {
-        logger.warn('AI provider not available, using simple routing');
+        moduleLogger.warn('AI provider not available, using simple routing');
       }
     } catch (error) {
-      logger.warn({ error }, 'Failed to initialize AI analyzer, using simple routing');
+      moduleLogger.warn(
+        {
+          err: error,
+          errorCode: 'AI_INIT_FAILED',
+          errorType: 'INITIALIZATION_ERROR',
+          recoverable: true,
+        },
+        'Failed to initialize AI analyzer, using simple routing',
+      );
     }
 
     // Initialize aggregator based on strategy
@@ -89,7 +108,7 @@ export class DelegationEngine {
     switch (strategy) {
       case 'ai-powered':
         if (!aiClient) {
-          logger.warn(
+          moduleLogger.warn(
             'AI aggregation requested but AI client not available, falling back to best-confidence',
           );
           this.aggregator = new ResponseAggregator(new BestConfidenceAggregator());
@@ -97,7 +116,14 @@ export class DelegationEngine {
           this.aggregator = new ResponseAggregator(
             new AIAggregator(aiClient, options.aggregationOptions),
           );
-          logger.info('Using AI-powered response aggregation');
+          moduleLogger.info(
+            {
+              aggregationType: 'ai-powered',
+              preserveAttribution: options.aggregationOptions?.preserveAttribution ?? true,
+              includeConfidence: options.aggregationOptions?.includeConfidence ?? true,
+            },
+            'Using AI-powered response aggregation',
+          );
         }
         break;
       case 'combine-answers':
@@ -114,6 +140,9 @@ export class DelegationEngine {
    * Route a query to the most appropriate librarian(s)
    */
   async route(query: string, context: Context): Promise<Response> {
+    const logger = createContextLogger('delegation-engine', context);
+    const timer = new PerformanceTimer();
+
     return withSpan(SpanNames.AI_DELEGATION, async (span) => {
       span.setAttributes({
         [SpanAttributes.QUERY_TEXT]: query,
@@ -121,7 +150,14 @@ export class DelegationEngine {
         [SpanAttributes.DELEGATION_TYPE]: 'ai-powered',
       });
 
-      logger.info({ query }, 'Delegation engine routing query');
+      logger.info(
+        {
+          queryLength: query.length,
+          hasAI: !!context.ai,
+          hasUser: !!context.user,
+        },
+        'Delegation engine routing query',
+      );
 
       // Get all available librarians
       const allLibrarians = this.router.getAllLibrarians();
@@ -146,7 +182,9 @@ export class DelegationEngine {
       if (this.aiAnalyzer && context.ai) {
         try {
           logger.debug('Using AI-powered query analysis');
+          timer.mark('ai_analysis_start');
           const analysis = await this.aiAnalyzer.analyze(query, librarianInfos, context);
+          timer.mark('ai_analysis_complete');
           decision = analysis.decision;
           engine = 'ai-powered';
 
@@ -163,11 +201,20 @@ export class DelegationEngine {
               intent: analysis.queryIntent,
               capabilities: analysis.requiredCapabilities,
               candidates: analysis.candidates.length,
+              analysisTimeMs: timer.getDurationBetween('ai_analysis_start', 'ai_analysis_complete'),
             },
             'AI analysis complete',
           );
         } catch (error) {
-          logger.error({ error }, 'AI analysis failed, falling back to simple routing');
+          logger.error(
+            {
+              err: error,
+              errorCode: 'AI_ANALYSIS_FAILED',
+              errorType: 'ANALYSIS_ERROR',
+              recoverable: true,
+            },
+            'AI analysis failed, falling back to simple routing',
+          );
           decision = this.analyzeQuery(query, context);
           engine = 'simple-fallback';
         }
@@ -209,13 +256,16 @@ export class DelegationEngine {
 
       logger.info(
         {
-          librarians: librariansToQuery,
-          decision,
+          targetLibrarians: librariansToQuery,
+          decisionConfidence: decision.confidence,
           engine,
-          parallelRouting: this.enableParallelRouting,
+          parallelRouting: this.enableParallelRouting && librariansToQuery.length > 1,
+          targetCount: librariansToQuery.length,
         },
         'Routing to librarian(s)',
       );
+
+      timer.mark('execution_start');
 
       // Execute queries
       let response: Response;
@@ -227,6 +277,7 @@ export class DelegationEngine {
           return errorResponse('NO_LIBRARIAN', 'No librarian to query');
         }
         response = await this.executor.execute(query, firstLibrarian, context);
+        timer.mark('execution_complete');
       } else {
         // Parallel query to multiple librarians
         const promises = librariansToQuery
@@ -252,16 +303,23 @@ export class DelegationEngine {
           );
 
         const responses = await Promise.all(promises);
+        timer.mark('parallel_execution_complete');
 
         logger.info(
           {
             totalResponses: responses.length,
             successfulResponses: responses.filter((r) => !r.error).length,
+            executionTimeMs: timer.getDurationBetween(
+              'execution_start',
+              'parallel_execution_complete',
+            ),
           },
           'Received responses from multiple librarians',
         );
 
+        timer.mark('aggregation_start');
         response = await this.aggregator.aggregate(responses, query, analysisContext);
+        timer.mark('aggregation_complete');
       }
 
       // Add delegation metadata
@@ -293,6 +351,16 @@ export class DelegationEngine {
             : 'none';
         recordResponseMetrics(response, 'delegation_engine', aggregationStrategy);
       }
+
+      // Log final performance metrics
+      logPerformance(logger, 'delegation.route', timer, {
+        engine,
+        targetCount: librariansToQuery.length,
+        parallelRouting: this.enableParallelRouting && librariansToQuery.length > 1,
+        aggregationStrategy: this.aggregationStrategy,
+        responseType: response.answer ? 'answer' : response.delegate ? 'delegate' : 'error',
+        confidence: response.confidence,
+      });
 
       return response;
     });
