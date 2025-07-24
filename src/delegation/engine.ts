@@ -9,6 +9,7 @@ import type { AIClient } from '../ai/interface';
 import { errorResponse } from '../types/librarian-factory';
 import { AIQueryAnalyzer } from './ai-analyzer';
 import { DelegationExecutor } from './executor';
+import { ResponseAggregator, BestConfidenceAggregator } from './aggregator';
 import { getAIClient } from '../ai/client';
 import pino from 'pino';
 
@@ -24,6 +25,8 @@ export interface DelegationDecision {
 
 export interface DelegationEngineOptions {
   aiClient?: AIClient;
+  enableParallelRouting?: boolean;
+  maxParallelQueries?: number;
 }
 
 /**
@@ -33,12 +36,19 @@ export interface DelegationEngineOptions {
 export class DelegationEngine {
   private aiAnalyzer?: AIQueryAnalyzer;
   private executor: DelegationExecutor;
+  private aggregator: ResponseAggregator;
+  private enableParallelRouting: boolean;
+  private maxParallelQueries: number;
 
   constructor(
     private router: SimpleRouter,
     options: DelegationEngineOptions = {},
   ) {
     this.executor = new DelegationExecutor(router);
+    this.aggregator = new ResponseAggregator(new BestConfidenceAggregator());
+    this.enableParallelRouting = options.enableParallelRouting ?? false;
+    this.maxParallelQueries = options.maxParallelQueries ?? 3;
+
     // Try to use provided AI client first, then fall back to global client
     try {
       const aiClient = options.aiClient || getAIClient();
@@ -111,18 +121,67 @@ export class DelegationEngine {
       });
     }
 
-    // For now, route to the first matching librarian
-    // TODO: Implement parallel routing and response aggregation
-    const primaryLibrarian = decision.librarians[0];
+    // Determine how many librarians to query
+    const librariansToQuery = this.enableParallelRouting
+      ? decision.librarians.slice(0, this.maxParallelQueries)
+      : [decision.librarians[0]];
 
-    if (primaryLibrarian === undefined) {
-      return errorResponse('NO_MATCH', 'No librarian selected for routing');
+    logger.info(
+      {
+        librarians: librariansToQuery,
+        decision,
+        engine,
+        parallelRouting: this.enableParallelRouting,
+      },
+      'Routing to librarian(s)',
+    );
+
+    // Execute queries
+    let response: Response;
+
+    if (librariansToQuery.length === 1) {
+      // Single librarian query
+      const firstLibrarian = librariansToQuery[0];
+      if (!firstLibrarian) {
+        return errorResponse('NO_LIBRARIAN', 'No librarian to query');
+      }
+      response = await this.executor.execute(query, firstLibrarian, context);
+    } else {
+      // Parallel query to multiple librarians
+      const promises = librariansToQuery
+        .filter((id): id is string => id !== undefined)
+        .map((librarianId) =>
+          this.executor
+            .execute(query, librarianId, {
+              ...context,
+              metadata: {
+                ...context.metadata,
+                librarian: librarianId,
+              },
+            })
+            .catch(
+              (error: Error): Response => ({
+                error: {
+                  code: 'EXECUTION_ERROR',
+                  message: error.message,
+                  librarian: librarianId,
+                },
+              }),
+            ),
+        );
+
+      const responses = await Promise.all(promises);
+
+      logger.info(
+        {
+          totalResponses: responses.length,
+          successfulResponses: responses.filter((r) => !r.error).length,
+        },
+        'Received responses from multiple librarians',
+      );
+
+      response = this.aggregator.aggregate(responses);
     }
-
-    logger.info({ librarian: primaryLibrarian, decision, engine }, 'Routing to librarian');
-
-    // Use the executor to handle delegation
-    const response = await this.executor.execute(query, primaryLibrarian, context);
 
     // Add delegation metadata
     if (!response.error) {
@@ -133,6 +192,8 @@ export class DelegationEngine {
           decision: decision.librarians,
           reasoning: decision.reasoning,
           confidence: decision.confidence,
+          queriedLibrarians: librariansToQuery,
+          parallelRouting: this.enableParallelRouting && librariansToQuery.length > 1,
         },
       };
     }
