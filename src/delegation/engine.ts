@@ -123,6 +123,7 @@ export class DelegationEngine {
     // Use AI-powered routing if available
     let decision: DelegationDecision;
     let engine: string;
+    let analysisContext: Record<string, any> | undefined;
 
     if (this.aiAnalyzer && context.ai) {
       try {
@@ -130,6 +131,14 @@ export class DelegationEngine {
         const analysis = await this.aiAnalyzer.analyze(query, librarianInfos, context);
         decision = analysis.decision;
         engine = 'ai-powered';
+
+        // Store analysis context for aggregation
+        analysisContext = {
+          intent: analysis.queryIntent,
+          capabilities: analysis.requiredCapabilities,
+          reasoning: analysis.decision.reasoning,
+          candidates: analysis.candidates.length,
+        };
 
         logger.info(
           {
@@ -216,7 +225,7 @@ export class DelegationEngine {
         'Received responses from multiple librarians',
       );
 
-      response = await this.aggregator.aggregate(responses);
+      response = await this.aggregator.aggregate(responses, query, analysisContext);
     }
 
     // Add delegation metadata

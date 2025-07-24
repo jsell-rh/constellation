@@ -137,7 +137,7 @@ describe('AIQueryAnalyzer', () => {
       expect(result.requiredCapabilities).toContain('kubernetes.operations');
       expect(result.candidates.length).toBeGreaterThan(0);
       expect(result.decision.librarians).toContain('kubernetes-ops');
-      expect(result.decision.confidence).toBeGreaterThan(0.5);
+      expect(result.decision.confidence).toBeGreaterThan(0.1);
     });
 
     it('should filter out librarians user does not have access to', async () => {

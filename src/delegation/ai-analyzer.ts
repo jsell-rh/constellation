@@ -8,6 +8,7 @@ import type { Context } from '../types/core';
 import type { LibrarianInfo } from '../types/core';
 import type { DelegationDecision } from './engine';
 import { getLibrarianRegistry } from '../registry/librarian-registry';
+import { getPromptLoader } from '../prompts/loader';
 import pino from 'pino';
 
 const logger = pino({
@@ -91,24 +92,12 @@ export class AIQueryAnalyzer {
   private async analyzeQueryIntent(
     query: string,
   ): Promise<{ intent: string; capabilities: string[] }> {
-    const prompt = `Analyze this query and determine:
-1. The user's intent (what they want to accomplish)
-2. Required capabilities to answer this query (as dot-separated paths like "kubernetes.operations" or "ai.analysis")
-
-Query: "${query}"
-
-Respond with ONLY valid JSON, no other text:
-{
-  "intent": "brief description of what user wants",
-  "capabilities": ["capability1", "capability2", ...]
-}
-
-Examples:
-- For "help me deploy to kubernetes": {"intent": "Deploy application to Kubernetes", "capabilities": ["kubernetes.deployment", "devops.operations"]}
-- For "review this code": {"intent": "Code review", "capabilities": ["code.analysis", "security.review"]}
-- For "what is the capital of France": {"intent": "General knowledge question", "capabilities": []}`;
-
     try {
+      // Use the prompt management system
+      const promptLoader = getPromptLoader();
+      const template = await promptLoader.load('ai-analysis', 'query-analysis');
+      const prompt = promptLoader.render(template, { query });
+
       const response = await this.aiClient.ask(prompt, {
         temperature: 0.3,
         max_tokens: 500,
@@ -240,31 +229,26 @@ Examples:
    */
   private async scoreRelevance(
     query: string,
-    queryAnalysis: { intent: string; capabilities: string[] },
+    _queryAnalysis: { intent: string; capabilities: string[] },
     librarian: LibrarianInfo,
   ): Promise<number> {
-    const prompt = `Score how well this librarian matches the query on a scale of 0-100.
-
-Query: "${query}"
-Query Intent: ${queryAnalysis.intent}
-Required Capabilities: ${queryAnalysis.capabilities.join(', ')}
-
-Librarian: ${librarian.name}
-Description: ${librarian.description}
-Capabilities: ${librarian.capabilities.join(', ')}
-Team: ${librarian.team}
-
-Consider:
-1. How well the librarian's capabilities match the required capabilities
-2. How well the librarian's description aligns with the query intent
-3. Whether this is the librarian's primary expertise area
-
-Respond with just a number between 0-100.`;
-
     try {
+      // Use the prompt management system
+      const promptLoader = getPromptLoader();
+      const template = await promptLoader.load('ai-analysis', 'librarian-relevance');
+      const prompt = promptLoader.render(template, {
+        query,
+        librarian: {
+          name: librarian.name,
+          description: librarian.description,
+          capabilities: librarian.capabilities,
+          team: librarian.team,
+        },
+      });
+
       const response = await this.aiClient.ask(prompt, {
         temperature: 0.2,
-        max_tokens: 10,
+        max_tokens: 100,
       });
 
       const score = parseInt(response.trim(), 10);

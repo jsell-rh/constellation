@@ -46,8 +46,8 @@ describe('AIAggregator', () => {
       const result = await aggregator.aggregate(responses);
 
       const callArgs = (mockAIClient.ask as jest.Mock).mock.calls[0];
-      expect(callArgs[0]).toContain('[kubernetes-expert (confidence: 0.9)]');
-      expect(callArgs[0]).toContain('[joke-teller (confidence: 0.8)]');
+      expect(callArgs[0]).toContain('### kubernetes-expert (confidence: 90%)');
+      expect(callArgs[0]).toContain('### joke-teller (confidence: 80%)');
       expect(callArgs[0]).toContain('Preserve attribution');
 
       expect(result.answer).toBe(mockCombinedAnswer);
@@ -88,12 +88,12 @@ describe('AIAggregator', () => {
       const prompt = (mockAIClient.ask as jest.Mock).mock.calls[0][0] as string;
       expect(prompt).not.toContain('Preserve attribution');
       expect(prompt).not.toContain('confidence:');
-      expect(prompt).toContain('[lib1]: Answer 1');
-      expect(prompt).toContain('[lib2]: Answer 2');
+      expect(prompt).toContain('### lib1\nAnswer 1');
+      expect(prompt).toContain('### lib2\nAnswer 2');
     });
 
     it('should use custom prompt when provided', async () => {
-      const customPrompt = 'Custom aggregation prompt: {{RESPONSES}}';
+      const customPrompt = 'Custom aggregation prompt for query "{{QUERY}}": {{RESPONSES}}';
       const aggregator = new AIAggregator(mockAIClient, {
         customPrompt,
       });
@@ -105,11 +105,11 @@ describe('AIAggregator', () => {
 
       (mockAIClient.ask as jest.Mock).mockResolvedValue('Result');
 
-      await aggregator.aggregate(responses);
+      await aggregator.aggregate(responses, 'test query');
 
       expect((mockAIClient.ask as jest.Mock).mock.calls).toHaveLength(1);
       const callArgs = (mockAIClient.ask as jest.Mock).mock.calls[0];
-      expect(callArgs[0]).toContain('Custom aggregation prompt:');
+      expect(callArgs[0]).toContain('Custom aggregation prompt for query "test query":');
       expect(callArgs[0]).toContain('[lib1]: Answer 1');
       expect(callArgs[0]).toContain('[lib2]: Answer 2');
     });

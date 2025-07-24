@@ -4,6 +4,7 @@
 
 import type { Response } from '../types/core';
 import type { AIClient } from '../ai/interface';
+import { getPromptLoader } from '../prompts/loader';
 import pino from 'pino';
 
 const logger = pino({
@@ -11,14 +12,22 @@ const logger = pino({
 });
 
 export interface AggregationStrategy {
-  aggregate(responses: Response[]): Response | Promise<Response>;
+  aggregate(
+    responses: Response[],
+    originalQuery?: string,
+    context?: Record<string, any>,
+  ): Response | Promise<Response>;
 }
 
 /**
  * Selects the response with highest confidence
  */
 export class BestConfidenceAggregator implements AggregationStrategy {
-  aggregate(responses: Response[]): Response {
+  aggregate(
+    responses: Response[],
+    _originalQuery?: string,
+    _context?: Record<string, any>,
+  ): Response {
     if (responses.length === 0) {
       return {
         error: {
@@ -141,7 +150,11 @@ export class BestConfidenceAggregator implements AggregationStrategy {
  * Combines answers from multiple responses
  */
 export class CombineAnswersAggregator implements AggregationStrategy {
-  aggregate(responses: Response[]): Response {
+  aggregate(
+    responses: Response[],
+    _originalQuery?: string,
+    _context?: Record<string, any>,
+  ): Response {
     if (responses.length === 0) {
       return {
         error: {
@@ -216,8 +229,12 @@ export class ResponseAggregator {
   /**
    * Aggregate multiple responses into a single response
    */
-  aggregate(responses: Response[]): Promise<Response> {
-    return Promise.resolve(this.strategy.aggregate(responses));
+  aggregate(
+    responses: Response[],
+    originalQuery?: string,
+    context?: Record<string, any>,
+  ): Promise<Response> {
+    return Promise.resolve(this.strategy.aggregate(responses, originalQuery, context));
   }
 }
 
@@ -237,7 +254,11 @@ export class AIAggregator implements AggregationStrategy {
     this.options.includeConfidence = this.options.includeConfidence ?? true;
   }
 
-  async aggregate(responses: Response[]): Promise<Response> {
+  async aggregate(
+    responses: Response[],
+    originalQuery?: string,
+    context?: Record<string, any>,
+  ): Promise<Response> {
     if (responses.length === 0) {
       return {
         error: {
@@ -265,39 +286,30 @@ export class AIAggregator implements AggregationStrategy {
     }
 
     try {
-      // Build the prompt with attribution
-      const responsesText = validResponses
-        .map((r) => {
-          const librarian = r.metadata?.librarian || 'Unknown Source';
-          const confidence =
-            this.options.includeConfidence && r.confidence ? ` (confidence: ${r.confidence})` : '';
-          return `[${String(librarian)}${confidence}]: ${r.answer}`;
-        })
-        .join('\n\n');
+      // Load and render prompt using the prompt management system
+      const promptLoader = getPromptLoader();
+      const template = await promptLoader.load('aggregation', 'ai-synthesis');
 
-      const attributionInstructions = this.options.preserveAttribution
-        ? '\nIMPORTANT: Preserve attribution by mentioning which librarian(s) provided which information when relevant.'
-        : '';
+      // Prepare variables for the prompt
+      const promptVariables: Record<string, unknown> = {
+        responses: validResponses,
+        ...(originalQuery && { originalQuery }),
+        ...(context && { context }),
+        ...(this.options.preserveAttribution && { preserveAttribution: 'true' }),
+        ...(this.options.includeConfidence && { includeConfidence: 'true' }),
+      };
 
       let prompt: string;
+
       if (this.options.customPrompt) {
-        // Replace {{RESPONSES}} placeholder in custom prompt
-        prompt = this.options.customPrompt.replace('{{RESPONSES}}', responsesText);
+        // Use custom prompt with placeholder replacement (legacy support)
+        const responsesText = this.formatResponses(validResponses);
+        prompt = this.options.customPrompt
+          .replace('{{QUERY}}', originalQuery || 'Unknown query')
+          .replace('{{RESPONSES}}', responsesText);
       } else {
-        prompt = `You are an AI assistant that combines multiple responses into a single, coherent answer.
-
-Here are the responses from different librarians:
-
-${responsesText}
-
-Your task is to create a unified response that:
-1. Synthesizes the best and most relevant information from all responses
-2. Resolves any contradictions intelligently
-3. Maintains a natural, conversational flow
-4. Preserves the key insights from each source${attributionInstructions}
-
-Please provide the combined response below:
-`;
+        // Use the new prompt management system
+        prompt = promptLoader.render(template, promptVariables);
       }
 
       const combinedAnswer = await this.aiClient.ask(prompt, {
@@ -369,6 +381,17 @@ Please provide the combined response below:
       const fallbackAggregator = new BestConfidenceAggregator();
       return fallbackAggregator.aggregate(responses);
     }
+  }
+
+  private formatResponses(responses: Response[]): string {
+    return responses
+      .map((r) => {
+        const librarian = r.metadata?.librarian || 'Unknown Source';
+        const confidence =
+          this.options.includeConfidence && r.confidence ? ` (confidence: ${r.confidence})` : '';
+        return `[${String(librarian)}${confidence}]: ${r.answer}`;
+      })
+      .join('\n\n');
   }
 
   private mergeSources(responses: Response[]): Response['sources'] {
