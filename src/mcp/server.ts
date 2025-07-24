@@ -16,6 +16,7 @@ import {
   enrichContextWithRequestId,
   requestIdMiddleware,
 } from '../core/request-id';
+import { createHealthEndpoints } from '../observability/health';
 import { z } from 'zod';
 import type { Request, Response as ExpressResponse } from 'express';
 
@@ -411,8 +412,11 @@ Note: Authentication requirements depend on the librarian:
     // Add request ID middleware
     app.use(requestIdMiddleware);
 
-    // Health check endpoint (before auth middleware)
-    app.get('/health', (_req, res) => {
+    // Add comprehensive health endpoints (before auth middleware)
+    createHealthEndpoints(app);
+
+    // Add simple MCP-specific health endpoint
+    app.get('/mcp/health', (_req, res) => {
       res.json({
         status: 'ok',
         server: this.options.name,

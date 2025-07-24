@@ -150,6 +150,23 @@ export class CircuitBreakerManager extends EventEmitter {
   }
 
   /**
+   * Get status of all circuit breakers
+   */
+  getStatus(): Record<string, { state: string; metrics: any }> {
+    const status: Record<string, { state: string; metrics: any }> = {};
+
+    for (const [id, breaker] of this.breakers) {
+      const breakerState = breaker.getState();
+      status[id] = {
+        state: breakerState.status,
+        metrics: breaker.getMetrics(),
+      };
+    }
+
+    return status;
+  }
+
+  /**
    * Force open a specific circuit breaker
    */
   openBreaker(librarianId: string): void {

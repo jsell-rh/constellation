@@ -12,6 +12,7 @@ import { createAIClientFromEnv } from './ai/client';
 import { loadLibrarians } from './registry/secure-loader';
 import { initializeTracing, initializeMetricsEndpoint } from './observability';
 import { createLogger } from './observability/logger';
+import { initializeHealthChecks, createHealthEndpoints } from './observability/health';
 import express from 'express';
 
 const logger = createLogger('main');
@@ -41,24 +42,16 @@ async function main(): Promise<void> {
   });
 
   // Initialize Prometheus metrics endpoint if enabled
+  let metricsApp: any = null;
+  const metricsPort = parseInt(process.env.METRICS_PORT || '9090');
+
   if (process.env.METRICS_ENABLED !== 'false') {
-    const metricsApp = express();
-    const metricsPort = parseInt(process.env.METRICS_PORT || '9090');
+    metricsApp = express();
 
     // Add metrics endpoint
     initializeMetricsEndpoint(metricsApp, metricsPort);
 
-    // Start the metrics server
-    metricsApp.listen(metricsPort, () => {
-      logger.info(
-        {
-          port: metricsPort,
-          endpoint: `/metrics`,
-          url: `http://localhost:${metricsPort}/metrics`,
-        },
-        'Prometheus metrics server started',
-      );
-    });
+    // Note: Health endpoints will be added after health manager is initialized
   }
 
   // Initialize AI client (optional - only if configured)
@@ -91,6 +84,29 @@ async function main(): Promise<void> {
 
   // Create router with AI-enabled executor
   const router = new SimpleRouter({ executor });
+
+  // Initialize health checks with router and AI client
+  const healthManager = initializeHealthChecks(router, aiClient || undefined);
+
+  // Now add health endpoints to metrics server
+  if (metricsApp) {
+    createHealthEndpoints(metricsApp);
+
+    // Start the metrics server
+    metricsApp.listen(metricsPort, () => {
+      logger.info(
+        {
+          port: metricsPort,
+          endpoints: ['/metrics', '/health', '/health/live', '/health/ready'],
+          url: `http://localhost:${metricsPort}`,
+        },
+        'Metrics and health server started',
+      );
+    });
+  }
+
+  // Start periodic health checks (every 30 seconds)
+  healthManager.startPeriodicChecks(30000);
 
   // Load librarians from secure registry
   const registryPath = process.env.REGISTRY_PATH || './registry/constellation-registry.yaml';
@@ -157,6 +173,19 @@ async function main(): Promise<void> {
 
   // Start MCP server
   await runMCPServer(router);
+
+  // Graceful shutdown
+  process.on('SIGTERM', () => {
+    logger.info('Received SIGTERM, shutting down gracefully');
+    healthManager.stopPeriodicChecks();
+    process.exit(0);
+  });
+
+  process.on('SIGINT', () => {
+    logger.info('Received SIGINT, shutting down gracefully');
+    healthManager.stopPeriodicChecks();
+    process.exit(0);
+  });
 }
 
 // Run if called directly

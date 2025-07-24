@@ -281,6 +281,13 @@ export class CacheManager extends EventEmitter {
   }
 
   /**
+   * Check if caching is enabled
+   */
+  isEnabled(): boolean {
+    return this.config.enabled !== false && this.cacheInstance !== null;
+  }
+
+  /**
    * Clear all caches
    */
   async clear(): Promise<void> {
