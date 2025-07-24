@@ -45,29 +45,29 @@ librarians:
       strategy: user-aware  # Each user gets their own cache
       tags: [joke]   # For bulk invalidation
 
-  # AI-powered librarians - team access required
-  - id: ai-assistant
-    name: AI Assistant
-    function: ./dist/src/librarians/ai-assistant-librarian.js
-    team: platform
-    description: General purpose AI assistant
-    permissions:
-      public: true  # TEMPORARY: Allow public access for testing
-      # allowedTeams: [platform, engineering, product]
-    performance:
-      timeout: 30000  # 30 second timeout for AI responses
-    resilience:
-      circuit_breaker:
-        failureThreshold: 0.3  # Open at 30% failure rate
-        volumeThreshold: 10    # Need at least 10 requests
-        windowSize: 30000      # 30 second window
-        timeout: 60000         # Try again after 1 minute
-        successThreshold: 3    # Need 3 successes to close
-    cache:
-      enabled: true
-      ttl: 1800             # Cache for 30 minutes
-      strategy: user-aware  # Each user gets their own cache
-      tags: [ai, general]   # For bulk invalidation
+  # # AI-powered librarians - team access required
+  # - id: ai-assistant
+  #   name: AI Assistant
+  #   function: ./dist/src/librarians/ai-assistant-librarian.js
+  #   team: platform
+  #   description: General purpose AI assistant
+  #   permissions:
+  #     public: true  # TEMPORARY: Allow public access for testing
+  #     # allowedTeams: [platform, engineering, product]
+  #   performance:
+  #     timeout: 30000  # 30 second timeout for AI responses
+  #   resilience:
+  #     circuit_breaker:
+  #       failureThreshold: 0.3  # Open at 30% failure rate
+  #       volumeThreshold: 10    # Need at least 10 requests
+  #       windowSize: 30000      # 30 second window
+  #       timeout: 60000         # Try again after 1 minute
+  #       successThreshold: 3    # Need 3 successes to close
+  #   cache:
+  #     enabled: true
+  #     ttl: 1800             # Cache for 30 minutes
+  #     strategy: user-aware  # Each user gets their own cache
+  #     tags: [ai, general]   # For bulk invalidation
 
   - id: kubernetes-expert
     name: Kubernetes Expert
