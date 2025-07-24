@@ -97,11 +97,16 @@ export class AIQueryAnalyzer {
 
 Query: "${query}"
 
-Respond in JSON format:
+Respond with ONLY valid JSON, no other text:
 {
   "intent": "brief description of what user wants",
   "capabilities": ["capability1", "capability2", ...]
-}`;
+}
+
+Examples:
+- For "help me deploy to kubernetes": {"intent": "Deploy application to Kubernetes", "capabilities": ["kubernetes.deployment", "devops.operations"]}
+- For "review this code": {"intent": "Code review", "capabilities": ["code.analysis", "security.review"]}
+- For "what is the capital of France": {"intent": "General knowledge question", "capabilities": []}`;
 
     try {
       const response = await this.aiClient.ask(prompt, {
@@ -109,15 +114,45 @@ Respond in JSON format:
         max_tokens: 500,
       });
 
-      const analysis = JSON.parse(response) as {
-        intent: string;
-        capabilities: string[];
-      };
+      // Try to extract JSON from the response
+      // Sometimes AI may include extra text before/after JSON
+      let jsonStr = response.trim();
 
-      logger.debug({ query, analysis }, 'Query intent analyzed');
-      return analysis;
+      // Try to find JSON object in the response
+      const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        jsonStr = jsonMatch[0];
+      }
+
+      try {
+        const analysis = JSON.parse(jsonStr) as {
+          intent: string;
+          capabilities: string[];
+        };
+
+        // Validate the response structure
+        if (!analysis.intent || !Array.isArray(analysis.capabilities)) {
+          throw new Error('Invalid response structure');
+        }
+
+        logger.debug({ query, analysis }, 'Query intent analyzed');
+        return analysis;
+      } catch (parseError) {
+        logger.warn({ response, parseError }, 'Failed to parse AI response as JSON');
+
+        // Try to extract intent from plain text response
+        const intent = response.includes('security')
+          ? 'Security analysis'
+          : response.includes('code')
+            ? 'Code analysis'
+            : 'General query';
+
+        return {
+          intent,
+          capabilities: [],
+        };
+      }
     } catch (error) {
-      console.log('ERROR!!', error);
       logger.error({ error, query }, 'Failed to analyze query intent');
       // Fallback to simple analysis
       return {
