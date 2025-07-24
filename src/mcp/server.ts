@@ -51,8 +51,15 @@ export class ConstellationMCPServer {
     // For stateless mode, we don't create a persistent server instance
     // Instead, we create new instances for each request
 
-    // Initialize delegation engine
-    this.delegationEngine = new DelegationEngine(router, { enableParallelRouting: true });
+    // Initialize delegation engine with AI client from router's context
+    const routerContext = (router as any).defaultContext || {};
+    const aiClient = routerContext.ai;
+
+    this.delegationEngine = new DelegationEngine(router, {
+      enableParallelRouting: true,
+      aggregationStrategy: 'ai-powered',
+      aiClient: aiClient,
+    });
   }
 
   /**

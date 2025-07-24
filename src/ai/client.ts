@@ -291,6 +291,19 @@ export function createAIClientFromEnv(): ConstellationAIClient {
     };
   }
 
+  // Gemini configuration (via OpenAI compatible endpoint)
+  if (process.env.GEMINI_API_KEY || process.env.AI_PROVIDER === 'gemini') {
+    config.openai = {
+      apiKey: process.env.GEMINI_API_KEY || process.env.OPENAI_API_KEY || '',
+      baseURL: 'https://generativelanguage.googleapis.com/v1beta/openai/',
+      ...(process.env.GEMINI_MODEL && { model: process.env.GEMINI_MODEL }),
+    };
+    // Override default provider if explicitly set to gemini
+    if (process.env.AI_PROVIDER === 'gemini') {
+      config.defaultProvider = 'openai'; // Gemini uses OpenAI config
+    }
+  }
+
   // Global defaults
   config.defaults = {
     temperature: process.env.AI_TEMPERATURE ? parseFloat(process.env.AI_TEMPERATURE) : 0.7,

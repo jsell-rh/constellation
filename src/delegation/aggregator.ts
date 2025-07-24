@@ -290,19 +290,36 @@ Here are the responses from different librarians:
 
 ${responsesText}
 
-Please create a unified response that:
+Your task is to create a unified response that:
 1. Synthesizes the best and most relevant information from all responses
 2. Resolves any contradictions intelligently
 3. Maintains a natural, conversational flow
 4. Preserves the key insights from each source${attributionInstructions}
 
-Combined response:`;
+Please provide the combined response below:
+`;
       }
 
       const combinedAnswer = await this.aiClient.ask(prompt, {
         temperature: 0.3, // Lower temperature for more consistent aggregation
         max_tokens: 1000,
       });
+
+      logger.debug(
+        {
+          promptLength: prompt.length,
+          responseLength: combinedAnswer.length,
+          response: combinedAnswer.substring(0, 100),
+        },
+        'AI aggregation response received',
+      );
+
+      // Validate AI response
+      if (!combinedAnswer || combinedAnswer.trim().length === 0) {
+        logger.warn('AI returned empty response, falling back to best confidence');
+        const fallbackAggregator = new BestConfidenceAggregator();
+        return fallbackAggregator.aggregate(responses);
+      }
 
       // Merge all sources
       const allSources = this.mergeSources(validResponses);
