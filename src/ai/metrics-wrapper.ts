@@ -185,7 +185,7 @@ export class MetricsAIProvider implements AIProvider {
       // call complete() and extract the content
       const messages: AIMessage[] = [{ role: 'user', content: prompt }];
       const timer = aiRequestDuration.startTimer(labels);
-      
+
       const response = await this.provider.complete(messages, options);
       timer();
 

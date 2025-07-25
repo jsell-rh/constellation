@@ -81,7 +81,7 @@ describe('CircuitBreaker', () => {
 
       // Should reject with circuit breaker error
       await expect(
-        breaker.execute(() => Promise.resolve('should not execute')),
+        breaker.execute(async () => Promise.resolve('should not execute')),
       ).rejects.toMatchObject({
         error: {
           code: 'CIRCUIT_BREAKER_OPEN',
@@ -206,7 +206,7 @@ describe('CircuitBreaker', () => {
       expect(breaker.getState().status).toBe('open');
 
       await expect(
-        breaker.execute(() => Promise.resolve('should not execute')),
+        breaker.execute(async () => Promise.resolve('should not execute')),
       ).rejects.toMatchObject({
         error: {
           code: 'CIRCUIT_BREAKER_OPEN',
@@ -262,7 +262,7 @@ describe('CircuitBreaker', () => {
 
       // Try to execute
       try {
-        await breaker.execute(() => Promise.resolve('should not execute'));
+        await breaker.execute(async () => Promise.resolve('should not execute'));
       } catch {
         // Expected
       }

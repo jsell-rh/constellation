@@ -80,6 +80,7 @@ export class HealthCheckManager {
   private registerDefaultChecks(): void {
     // Router health check
     if (this.router) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       this.register('router', async () => {
         const startTime = Date.now();
         try {
@@ -117,6 +118,7 @@ export class HealthCheckManager {
 
     // AI Client health check
     if (this.aiClient) {
+      // eslint-disable-next-line @typescript-eslint/require-await
       this.register('ai-client', async () => {
         const startTime = Date.now();
         try {
@@ -202,6 +204,7 @@ export class HealthCheckManager {
     });
 
     // Circuit breaker health check
+    // eslint-disable-next-line @typescript-eslint/require-await
     this.register('circuit-breakers', async () => {
       const startTime = Date.now();
       try {
@@ -265,6 +268,7 @@ export class HealthCheckManager {
     });
 
     // Memory health check
+    // eslint-disable-next-line @typescript-eslint/require-await
     this.register('memory', async () => {
       const startTime = Date.now();
       try {
@@ -581,7 +585,7 @@ export function createHealthEndpoints(app: any): void {
   });
 
   // Kubernetes readiness probe (checks if ready to serve traffic)
-  app.get('/health/ready', async (_req: any, res: any) => {
+  app.get('/health/ready', (_req: any, res: any) => {
     try {
       const health = manager.getCachedResults();
 
