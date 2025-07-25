@@ -51,31 +51,48 @@ export class MetricsAIProvider implements AIProvider {
       aiRequests.inc({ ...labels, status: 'success' });
 
       // Record token usage if available
+      logger.debug('Checking AI response for usage data', {
+        provider: this.provider.name,
+        hasUsage: !!response.usage,
+        usageData: response.usage,
+        responseKeys: Object.keys(response),
+        model: response.model,
+      });
+
       if (response.usage) {
-        aiTokensUsed.inc(
-          {
-            provider: this.provider.name,
-            model: response.model || 'default',
-            type: 'prompt',
-          },
-          response.usage.prompt_tokens,
-        );
+        const promptLabels = {
+          provider: this.provider.name,
+          model: response.model || 'default',
+          type: 'prompt',
+        };
+        const completionLabels = {
+          provider: this.provider.name,
+          model: response.model || 'default',
+          type: 'completion',
+        };
 
-        aiTokensUsed.inc(
-          {
-            provider: this.provider.name,
-            model: response.model || 'default',
-            type: 'completion',
-          },
-          response.usage.completion_tokens,
-        );
+        logger.debug('Recording token metrics', {
+          promptLabels,
+          promptTokens: response.usage.prompt_tokens,
+          completionLabels,
+          completionTokens: response.usage.completion_tokens,
+        });
 
-        logger.debug('AI request completed with token usage', {
+        aiTokensUsed.inc(promptLabels, response.usage.prompt_tokens);
+        aiTokensUsed.inc(completionLabels, response.usage.completion_tokens);
+
+        logger.info('AI token usage recorded', {
           provider: this.provider.name,
           model: response.model,
           promptTokens: response.usage.prompt_tokens,
           completionTokens: response.usage.completion_tokens,
           totalTokens: response.usage.prompt_tokens + response.usage.completion_tokens,
+        });
+      } else {
+        logger.warn('No usage data in AI response', {
+          provider: this.provider.name,
+          model: response.model,
+          responseKeys: Object.keys(response),
         });
       }
 
