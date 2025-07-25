@@ -181,12 +181,45 @@ export class MetricsAIProvider implements AIProvider {
     };
 
     try {
-      const result = await timeExecution(aiRequestDuration, labels, () =>
-        this.provider.ask(prompt, options),
-      );
+      // Instead of calling provider.ask() which loses usage data,
+      // call complete() and extract the content
+      const messages: AIMessage[] = [{ role: 'user', content: prompt }];
+      const timer = aiRequestDuration.startTimer(labels);
+      
+      const response = await this.provider.complete(messages, options);
+      timer();
 
+      // Record successful request
       aiRequests.inc({ ...labels, status: 'success' });
-      return result;
+
+      // Record token usage if available (from complete response)
+      if (response.usage) {
+        logger.debug('Recording token metrics from ask operation', {
+          provider: this.provider.name,
+          promptTokens: response.usage.prompt_tokens,
+          completionTokens: response.usage.completion_tokens,
+        });
+
+        aiTokensUsed.inc(
+          {
+            provider: this.provider.name,
+            model: response.model || 'default',
+            type: 'prompt',
+          },
+          response.usage.prompt_tokens,
+        );
+
+        aiTokensUsed.inc(
+          {
+            provider: this.provider.name,
+            model: response.model || 'default',
+            type: 'completion',
+          },
+          response.usage.completion_tokens,
+        );
+      }
+
+      return response.content;
     } catch (error) {
       aiRequests.inc({ ...labels, status: 'error' });
 
