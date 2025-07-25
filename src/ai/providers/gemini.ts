@@ -97,6 +97,7 @@ export class GeminiProvider implements AIProvider {
         throw new Error('No response from Gemini');
       }
 
+
       return {
         content: choice.message.content || '',
         ...(completion.usage && {
