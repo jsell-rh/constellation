@@ -112,7 +112,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "up{job=\"constellation\"}",
+          "expr": "constellation_system_health{component=\"overall\"}",
           "refId": "A"
         }
       ],
@@ -203,7 +203,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "constellation_process_resident_memory_bytes / constellation_process_max_heap_bytes * 100",
+          "expr": "(constellation_nodejs_heap_size_used_bytes / constellation_nodejs_heap_size_total_bytes) * 100",
           "legendFormat": "Heap Usage",
           "refId": "A"
         }
@@ -309,7 +309,7 @@
             "uid": "${datasource}"
           },
           "expr": "rate(constellation_librarian_executions_total[5m])",
-          "legendFormat": "{{librarian_id}}",
+          "legendFormat": "{{librarian}}",
           "refId": "A"
         }
       ],
@@ -400,8 +400,8 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "histogram_quantile(0.95, sum(rate(constellation_librarian_duration_seconds_bucket[5m])) by (librarian_id, le))",
-          "legendFormat": "{{librarian_id}} p95",
+          "expr": "histogram_quantile(0.95, sum(rate(constellation_librarian_execution_duration_seconds_bucket[5m])) by (librarian, le))",
+          "legendFormat": "{{librarian}} p95",
           "refId": "A"
         }
       ],
@@ -505,7 +505,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(constellation_ai_provider_requests_total[5m])",
+          "expr": "rate(constellation_ai_requests_total[5m])",
           "legendFormat": "{{provider}} - {{status}}",
           "refId": "A"
         }
@@ -597,7 +597,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "increase(constellation_ai_provider_tokens_total[5m])",
+          "expr": "increase(constellation_ai_tokens_total[5m])",
           "legendFormat": "{{provider}} - {{type}}",
           "refId": "A"
         }
@@ -689,7 +689,7 @@
             "uid": "${datasource}"
           },
           "expr": "constellation_circuit_breaker_state",
-          "legendFormat": "{{librarian_id}}",
+          "legendFormat": "{{librarian}}",
           "refId": "A"
         }
       ],
@@ -781,7 +781,7 @@
             "uid": "${datasource}"
           },
           "expr": "rate(constellation_circuit_breaker_rejections_total[5m])",
-          "legendFormat": "{{librarian_id}}",
+          "legendFormat": "{{librarian}}",
           "refId": "A"
         }
       ],

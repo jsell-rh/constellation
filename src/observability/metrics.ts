@@ -172,6 +172,15 @@ export const errorCounter = new Counter({
 });
 
 /**
+ * System health metrics
+ */
+export const systemHealth = new Gauge({
+  name: 'constellation_system_health',
+  help: 'System health status (1=healthy, 0=unhealthy)',
+  labelNames: ['component'],
+});
+
+/**
  * Performance SLA metrics
  */
 export const slaViolations = new Counter({

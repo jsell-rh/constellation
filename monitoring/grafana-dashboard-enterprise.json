@@ -119,7 +119,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "up{job=\"constellation\"}",
+          "expr": "constellation_system_health{component=\"overall\"}",
           "refId": "A"
         }
       ],

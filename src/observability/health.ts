@@ -8,6 +8,7 @@ import type { SimpleRouter } from '../core/router';
 import type { AIClient } from '../ai/interface';
 import { getCacheManager } from '../cache/cache-manager';
 import { getCircuitBreakerManager } from '../resilience/circuit-breaker-manager';
+import { systemHealth } from './metrics';
 import os from 'os';
 
 const logger = createLogger('health-check');
@@ -420,6 +421,17 @@ export class HealthCheckManager {
       }),
     };
 
+    // Update system health metric
+    systemHealth.set({ component: 'overall' }, overallStatus === HealthStatus.HEALTHY ? 1 : 0);
+
+    // Update individual component metrics
+    for (const component of results) {
+      systemHealth.set(
+        { component: component.name },
+        component.status === HealthStatus.HEALTHY ? 1 : 0,
+      );
+    }
+
     logger.info(
       {
         status: overallStatus,
@@ -448,6 +460,15 @@ export class HealthCheckManager {
       : hasDegraded
         ? HealthStatus.DEGRADED
         : HealthStatus.HEALTHY;
+
+    // Update metrics from cached results
+    systemHealth.set({ component: 'overall' }, overallStatus === HealthStatus.HEALTHY ? 1 : 0);
+    for (const component of results) {
+      systemHealth.set(
+        { component: component.name },
+        component.status === HealthStatus.HEALTHY ? 1 : 0,
+      );
+    }
 
     return {
       status: overallStatus,
